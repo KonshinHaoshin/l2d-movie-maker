@@ -2,95 +2,118 @@ import { useEffect, useRef, useState } from "react";
 import * as PIXI from "pixi.js";
 import { Live2DModel } from "pixi-live2d-display";
 
-interface Motion {
-    name: string;
-    file: string;
-}
+import Timeline from "./timeline/Timeline";
+import type { Clip, TrackKind } from "./timeline/types";
 
-interface Expression {
-    name: string;
-    file: string;
-}
+import { parseMtn } from "../utils/parseMtn";
+import "./Live2DView.css";
+import ControlPanel from "./panel/ControlPanel";
 
+interface Motion { name: string; file: string; }
+interface Expression { name: string; file: string; }
 interface ModelData {
     motions: { [key: string]: Motion[] };
     expressions: Expression[];
 }
 
-const Live2DView = () => {
+const JSON_URL = "/model/anon/model.json";
+
+// group -> 秒
+type MotionLenMap = Record<string, number>;
+
+export default function Live2DView() {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const modelRef = useRef<Live2DModel | null>(null);
+
     const [modelData, setModelData] = useState<ModelData | null>(null);
     const [currentMotion, setCurrentMotion] = useState<string>("");
     const [currentExpression, setCurrentExpression] = useState<string>("default");
     const [showControls, setShowControls] = useState<boolean>(true);
-    const [enableDragging, setEnableDragging] = useState<boolean>(true); // 默认启用拖拽
+    const [enableDragging, setEnableDragging] = useState<boolean>(true);
     const [isDragging, setIsDragging] = useState<boolean>(false);
 
-    useEffect(() => {
+    // —— 时间线 ——
+    const [motionClips, setMotionClips] = useState<Clip[]>([]);
+    const [exprClips, setExprClips] = useState<Clip[]>([]);
+    const [playhead, setPlayhead] = useState(0);
+    const [isPlaying, setIsPlaying] = useState(false);
 
-       const run = async () => {
-            if (!canvasRef.current) {
-                console.error("❌ canvasRef is null");
-                return;
-            }
+    const rafRef = useRef<number | null>(null);
+    const startTsRef = useRef<number | null>(null);
+    const firedRef = useRef<Set<string>>(new Set());
+
+    // 默认时长（兜底）
+    const [motionDur, setMotionDur] = useState(2);   // s
+    const [exprDur, setExprDur] = useState(0.8);     // s
+
+    // 解析得到的每组 motion 的真实时长
+    const [motionLen, setMotionLen] = useState<MotionLenMap>({});
+
+    const clearTimeline = () => { setMotionClips([]); setExprClips([]); setPlayhead(0); };
+
+    // 拖动/裁剪后修改片段
+    const changeClip = (
+        track: TrackKind,
+        id: string,
+        patch: Partial<Pick<Clip, "start" | "duration">>
+    ) => {
+        if (track === "motion") {
+            setMotionClips(prev => prev.map(c => (c.id === id ? { ...c, ...patch } : c)));
+        } else {
+            setExprClips(prev => prev.map(c => (c.id === id ? { ...c, ...patch } : c)));
+        }
+    };
+
+    const setPlayheadSec = (sec: number) => setPlayhead(sec);
+
+    // ————————————————————————————————————————————
+    // 初始化 PIXI & Live2D
+    // ————————————————————————————————————————————
+    useEffect(() => {
+        let disposed = false;
+        let resizeHandler: (() => void) | null = null;
+
+        const run = async () => {
+            if (!canvasRef.current) return;
 
             (window as any).PIXI = PIXI;
-
             const app = new PIXI.Application({
-                view: canvasRef.current,
-                backgroundAlpha: 0,
-                resizeTo: window,
+                view: canvasRef.current, backgroundAlpha: 0, resizeTo: window,
             });
 
             try {
-                console.log("📦 正在加载模型...");
-                const model = await Live2DModel.from("/model/anon/model.json");
-
+                const model = await Live2DModel.from(JSON_URL);
+                if (disposed) return;
                 modelRef.current = model;
 
-                // 加载模型数据
-                const response = await fetch("/model/anon/model.json");
-                const data = await response.json();
+                const res = await fetch(JSON_URL);
+                const data = await res.json();
+                if (disposed) return;
                 setModelData(data);
 
                 model.anchor.set(0.5, 0.5);
                 model.scale.set(0.3);
                 model.position.set(app.screen.width / 2, app.screen.height / 2);
 
-                // 这是我想出来的最抽象的解决鼠标跟踪的方法，不许笑！
-                {
-                    const im = (model as any).internalModel as any;
-                    if (im) {
-                        ([
-                            "angleXParamIndex",
-                            "angleYParamIndex",
-                            "angleZParamIndex",
-                            "bodyAngleXParamIndex",
-                            "eyeballYParamIndex",
-                            "eyeballXParamIndex",
-                        ] as const).forEach((k) => {
-                            if (typeof im[k] === "number") im[k] = -1;
-                        });
-                    }
-                }
+                // 关闭自动交互（鼠标跟随）
+                (model as any).autoInteract = false;
 
+                // 禁用头部旋转（保留呼吸等自然动）
+                const im = (model as any).internalModel as any;
+                if (im) {
+                    ["angleXParamIndex", "angleYParamIndex", "angleZParamIndex"].forEach((k) => {
+                        if (typeof im[k] === "number") im[k] = -1;
+                    });
+                }
 
                 app.stage.addChild(model);
 
-                // 启用拖拽功能
-                if (enableDragging) {
-                    makeDraggable(model);
-                }
+                // 拖拽
+                if (enableDragging) makeDraggable(model);
 
-                // 移除点击播放随机动作的功能
-                // 只保留拖拽功能
-
-                window.addEventListener("resize", () => {
-                    model.position.set(app.screen.width / 2, app.screen.height / 2);
-                });
-
-                console.log("✅ 模型加载成功");
+                // 自适应
+                resizeHandler = () => model.position.set(app.screen.width / 2, app.screen.height / 2);
+                window.addEventListener("resize", resizeHandler);
             } catch (err) {
                 console.error("❌ 模型加载失败:", err);
             }
@@ -99,39 +122,145 @@ const Live2DView = () => {
         run();
 
         return () => {
+            disposed = true;
+            if (rafRef.current) cancelAnimationFrame(rafRef.current);
+            if (resizeHandler) window.removeEventListener("resize", resizeHandler);
             if (canvasRef.current) {
-                const view = canvasRef.current;
-                view.width = 0;
-                view.height = 0;
+                canvasRef.current.width = 0;
+                canvasRef.current.height = 0;
             }
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [enableDragging]);
 
-    const playMotion = (motionName: string) => {
-        if (modelRef.current && modelData?.motions[motionName]) {
-            // 使用类似提供的代码中的方式来播放动作
-            // 调用 motion 方法，传入动画索引和优先级
-            modelRef.current.motion(motionName, 0, 3); // 默认动画索引和优先级
-            setCurrentMotion(motionName);
+    // ————————————————————————————————————————————
+    // 解析 .mtn：为每个 motion 组预取真实时长（秒）
+    // ————————————————————————————————————————————
+    useEffect(() => {
+        if (!modelData) return;
+        let aborted = false;
 
-            console.log(`🎬 播放动作: ${motionName}, 索引: 0, 优先级: 3`);
-        }
+        const base = JSON_URL.slice(0, JSON_URL.lastIndexOf("/") + 1);
+        const resolveUrl = (rel: string) => {
+            if (/^https?:\/\//i.test(rel)) return rel;
+            if (rel.startsWith("/")) return rel;               // 已是绝对路径
+            if (rel.startsWith("./")) rel = rel.slice(2);
+            return base + rel;
+        };
+
+        (async () => {
+            const entries = Object.entries(modelData.motions); // [group, Motion[]][]
+            const results = await Promise.all(
+                entries.map(async ([group, arr]) => {
+                    const first = arr?.[0]?.file;
+                    if (!first || !/\.mtn$/i.test(first)) return [group, undefined] as const;
+                    try {
+                        const txt = await (await fetch(resolveUrl(first))).text();
+                        const info = parseMtn(txt);
+                        return [group, info.durationMs / 1000] as const;
+                    } catch {
+                        return [group, undefined] as const;
+                    }
+                })
+            );
+            if (aborted) return;
+            setMotionLen(Object.fromEntries(results.filter(([, s]) => s != null) as [string, number][]));
+        })();
+
+        return () => { aborted = true; };
+    }, [modelData]);
+
+    // ————————————————————————————————————————————
+    // 播放调用
+    // ————————————————————————————————————————————
+    const playMotion = (group: string) => {
+        const m = modelRef.current;
+        if (!m) return;
+        if (!modelData?.motions[group]) return;
+        m.motion(group, 0, 3);
+        setCurrentMotion(group);
     };
 
-    const setExpression = (expressionName: string) => {
-        if (modelRef.current && modelData?.expressions) {
-            const expression = modelData.expressions.find(exp => exp.name === expressionName);
-            if (expression) {
-                // 使用类似提供的代码中的方式来设置表情
-                modelRef.current.expression(expressionName);
-                setCurrentExpression(expressionName);
+    const applyExpression = (name: string) => {
+        const m = modelRef.current;
+        if (!m) return;
+        if (!modelData?.expressions?.length) return;
+        m.expression(name);
+        setCurrentExpression(name);
+    };
 
-                console.log(`😊 设置表情: ${expressionName}`);
+    // ————————————————————————————————————————————
+    // 时间线：添加片段
+    // ————————————————————————————————————————————
+    const nextEnd = (clips: Clip[]) =>
+        clips.reduce((t, c) => Math.max(t, c.start + c.duration), 0);
+
+    const addMotionClip = async (name: string) => {
+        if (!name) return;
+        const dur = motionLen[name] ?? motionDur; // 优先真实时长
+        setMotionClips((prev) => [
+            ...prev,
+            { id: crypto.randomUUID(), name, start: nextEnd(prev), duration: dur },
+        ]);
+    };
+
+    const addExprClip = (name: string) => {
+        if (!name) return;
+        setExprClips((prev) => [
+            ...prev,
+            { id: crypto.randomUUID(), name, start: nextEnd(prev), duration: exprDur },
+        ]);
+    };
+
+    // ————————————————————————————————————————————
+    // 时间线：播放控制
+    // ————————————————————————————————————————————
+    const timelineLength = Math.max(nextEnd(motionClips), nextEnd(exprClips));
+
+    const tick = (ts: number) => {
+        if (startTsRef.current == null) startTsRef.current = ts;
+        const t = (ts - startTsRef.current) / 1000; // 秒
+        setPlayhead(t);
+
+        for (const c of motionClips) {
+            if (t >= c.start && !firedRef.current.has(c.id)) {
+                playMotion(c.name);
+                firedRef.current.add(c.id);
             }
         }
+        for (const c of exprClips) {
+            if (t >= c.start && !firedRef.current.has(c.id)) {
+                applyExpression(c.name);
+                firedRef.current.add(c.id);
+            }
+        }
+
+        if (t >= timelineLength) {
+            stopPlayback();
+            return;
+        }
+        rafRef.current = requestAnimationFrame(tick);
     };
 
-    // 拖拽立绘功能
+    const startPlayback = () => {
+        if (isPlaying || timelineLength <= 0) return;
+        firedRef.current.clear();
+        setPlayhead(0);
+        setIsPlaying(true);
+        startTsRef.current = null;
+        rafRef.current = requestAnimationFrame(tick);
+    };
+
+    const stopPlayback = () => {
+        if (rafRef.current) cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+        startTsRef.current = null;
+        setIsPlaying(false);
+    };
+
+    // ————————————————————————————————————————————
+    // 拖拽
+    // ————————————————————————————————————————————
     const makeDraggable = (model: any) => {
         model.interactive = true;
         model.buttonMode = true;
@@ -141,7 +270,6 @@ const Live2DView = () => {
             model.dragging = true;
             model._pointerX = e.data.global.x - model.x;
             model._pointerY = e.data.global.y - model.y;
-            console.log("🖱️ 开始拖拽");
         });
 
         model.on("pointermove", (e: any) => {
@@ -151,194 +279,75 @@ const Live2DView = () => {
             }
         });
 
-        model.on("pointerup", () => {
-            setIsDragging(false);
-            model.dragging = false;
-            console.log("✅ 拖拽结束");
-        });
-
-        model.on("pointerupoutside", () => {
-            setIsDragging(false);
-            model.dragging = false;
-            console.log("✅ 拖拽结束（外部）");
-        });
+        const up = () => { setIsDragging(false); model.dragging = false; };
+        model.on("pointerup", up);
+        model.on("pointerupoutside", up);
     };
-
-    // 切换拖拽功能
-    const toggleDragging = () => {
-        if (modelRef.current) {
-            if (enableDragging) {
-                makeDraggable(modelRef.current);
-                console.log("✅ 启用拖拽功能");
-            } else {
-                // 移除拖拽事件
-                modelRef.current.off("pointerdown");
-                modelRef.current.off("pointermove");
-                modelRef.current.off("pointerup");
-                modelRef.current.off("pointerupoutside");
-                modelRef.current.interactive = false;
-                modelRef.current.buttonMode = false;
-                console.log("❌ 禁用拖拽功能");
-            }
-        }
-    };
-
 
     return (
-        <div style={{ position: "relative", width: "100vw", height: "100vh" }}>
-            <canvas
-                ref={canvasRef}
-                style={{ width: "100%", height: "100%", display: "block" }}
-            />
+        <div className="l2d-root">
+            {/* 画布区域 */}
+            <div className="l2d-stage">
+                <canvas ref={canvasRef} className="l2d-stage-canvas" />
+            </div>
 
             {/* 控制面板 */}
             {showControls && (
-                <div style={{
-                    position: "absolute",
-                    top: "20px",
-                    right: "20px",
-                    background: "rgba(0, 0, 0, 0.8)",
-                    color: "white",
-                    padding: "20px",
-                    borderRadius: "10px",
-                    maxWidth: "300px",
-                    maxHeight: "80vh",
-                    overflowY: "auto",
-                    fontFamily: "Arial, sans-serif"
-                }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "15px" }}>
-                        <h3 style={{ margin: 0 }}>🎭 Live2D 控制面板</h3>
-                        <button
-                            onClick={() => setShowControls(false)}
-                            style={{
-                                background: "none",
-                                border: "none",
-                                color: "white",
-                                fontSize: "18px",
-                                cursor: "pointer"
-                            }}
-                        >
-                            ✕
-                        </button>
-                    </div>
+                <ControlPanel
+                    onClose={() => setShowControls(false)}
 
-                    {/* 动作选择 */}
-                    <div style={{ marginBottom: "20px" }}>
-                        <h4 style={{ margin: "0 0 10px 0", color: "#ffd700" }}>🎬 动作</h4>
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: "5px" }}>
-                            {modelData && Object.keys(modelData.motions).map(motion => (
-                                <button
-                                    key={motion}
-                                    onClick={() => playMotion(motion)}
-                                    style={{
-                                        background: currentMotion === motion ? "#ff6b6b" : "#4a4a4a",
-                                        color: "white",
-                                        border: "none",
-                                        padding: "5px 8px",
-                                        borderRadius: "5px",
-                                        fontSize: "12px",
-                                        cursor: "pointer",
-                                        transition: "background 0.2s"
-                                    }}
-                                    title={motion}
-                                >
-                                    {motion}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
+                    modelData={modelData}
+                    motionLen={motionLen}
 
-                    {/* 表情选择 */}
-                    <div style={{ marginBottom: "20px" }}>
-                        <h4 style={{ margin: "0 0 10px 0", color: "#ffd700" }}>😊 表情</h4>
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: "5px" }}>
-                            {modelData && modelData.expressions.map(expression => (
-                                <button
-                                    key={expression.name}
-                                    onClick={() => setExpression(expression.name)}
-                                    style={{
-                                        background: currentExpression === expression.name ? "#ff6b6b" : "#4a4a4a",
-                                        color: "white",
-                                        border: "none",
-                                        padding: "5px 8px",
-                                        borderRadius: "5px",
-                                        fontSize: "12px",
-                                        cursor: "pointer",
-                                        transition: "background 0.2s"
-                                    }}
-                                    title={expression.name}
-                                    >
-                                    {expression.name}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
+                    currentMotion={currentMotion}
+                    currentExpression={currentExpression}
 
-                    {/* 拖拽控制 */}
-                    <div style={{ marginBottom: "20px" }}>
-                        <h4 style={{ margin: "0 0 10px 0", color: "#ffd700" }}>🖱️ 拖拽控制</h4>
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                            <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px" }}>
-                                <input
-                                    type="checkbox"
-                                    checked={enableDragging}
-                                    onChange={(e) => {
-                                        setEnableDragging(e.target.checked);
-                                        setTimeout(toggleDragging, 100);
-                                    }}
-                                    style={{ width: "16px", height: "16px" }}
-                                />
-                                启用拖拽移动
-                            </label>
-                        </div>
-                        {isDragging && (
-                            <div style={{
-                                fontSize: "11px",
-                                color: "#87ceeb",
-                                marginTop: "5px",
-                                fontStyle: "italic"
-                            }}>
-                                正在拖拽中...
-                            </div>
-                        )}
-                    </div>
+                    motionDur={motionDur}
+                    exprDur={exprDur}
+                    setMotionDur={setMotionDur}
+                    setExprDur={setExprDur}
 
-                    {/* 当前状态显示 */}
-                    <div style={{
-                        background: "rgba(255, 255, 255, 0.1)",
-                        padding: "10px",
-                        borderRadius: "5px",
-                        fontSize: "12px"
-                    }}>
-                        <div>当前动作: <span style={{ color: "#ffd700" }}>{currentMotion || "无"}</span></div>
-                        <div>当前表情: <span style={{ color: "#ffd700" }}>{currentExpression}</span></div>
-                        <div>拖拽状态: <span style={{ color: "#ffd700" }}>{isDragging ? "拖拽中" : "静止"}</span></div>
-                    </div>
-                </div>
+                    chooseMotion={(name) => { playMotion(name); setCurrentMotion(name); }}
+                    chooseExpression={(name) => { applyExpression(name); setCurrentExpression(name); }}
+
+                    addMotionClip={addMotionClip}
+                    addExprClip={addExprClip}
+
+                    enableDragging={enableDragging}
+                    setEnableDragging={setEnableDragging}
+                    isDragging={isDragging}
+
+                    timelineLength={timelineLength}
+                    playhead={playhead}
+                    isPlaying={isPlaying}
+                    startPlayback={startPlayback}
+                    stopPlayback={stopPlayback}
+                    clearTimeline={clearTimeline}
+                />
             )}
 
-            {/* 显示控制面板按钮 */}
-            {!showControls && (
-                <button
-                    onClick={() => setShowControls(true)}
-                    style={{
-                        position: "absolute",
-                        top: "20px",
-                        right: "20px",
-                        background: "rgba(0, 0, 0, 0.8)",
-                        color: "white",
-                        border: "none",
-                        padding: "10px 15px",
-                        borderRadius: "5px",
-                        cursor: "pointer",
-                        fontSize: "14px"
+            {/* 底部时间线 */}
+            <div className="l2d-timeline">
+                <Timeline
+                    motionClips={motionClips}
+                    exprClips={exprClips}
+                    playheadSec={playhead}
+                    onChangeClip={changeClip}
+                    onRemoveClip={(track, id) => {
+                        if (track === "motion") setMotionClips(prev => prev.filter(c => c.id !== id));
+                        else setExprClips(prev => prev.filter(c => c.id !== id));
                     }}
-                >
+                    onSetPlayhead={setPlayheadSec}
+                    // 可不传 pixelsPerSec，内部自管（支持Alt+滚轮/按钮缩放）
+                />
+            </div>
+
+            {/* 收起按钮 */}
+            {!showControls && (
+                <button className="l2d-toggle" onClick={() => setShowControls(true)}>
                     🎛️ 显示控制面板
                 </button>
             )}
         </div>
     );
-};
-
-export default Live2DView;
+}

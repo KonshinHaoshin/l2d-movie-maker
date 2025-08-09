@@ -1,0 +1,198 @@
+/* ========== 布局 ========== */
+.l2d-root {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    font-family: -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Ubuntu,"Helvetica Neue",Arial,"Noto Sans","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+}
+
+.l2d-stage {
+    position: absolute;
+    inset: 0;
+    padding-bottom: 160px; /* 给底部时间线留空间 */
+}
+.l2d-stage-canvas {
+    position: absolute;
+    inset: 0;
+    display: block;
+}
+
+/* ========== 控制面板 ========== */
+.l2d-panel {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    z-index: 20;
+    background: rgba(0,0,0,.82);
+    color: #fff;
+    padding: 16px;
+    border-radius: 10px;
+    max-width: 380px;
+    max-height: 70vh;
+    overflow: auto;
+    box-shadow: 0 8px 24px rgba(0,0,0,.35);
+    backdrop-filter: blur(6px);
+}
+.l2d-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+.l2d-panel-title { margin: 0; font-size: 16px; }
+.l2d-close {
+    background: none; border: none; color: #fff; font-size: 18px; cursor: pointer;
+}
+
+.l2d-section { margin: 12px 0; }
+.l2d-section-title { margin: 0 0 8px 0; color: #ffd700; font-size: 14px; }
+.l2d-section-title-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px;
+}
+
+.l2d-search input {
+    width: 160px; padding: 6px 8px; border-radius: 6px; border: 1px solid #444; background:#222; color:#fff;
+}
+
+.row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.row.spread { justify-content: space-between; }
+
+.input {
+    width: 80px; padding: 6px 8px; border-radius: 6px; border: 1px solid #555; background: #222; color: #fff;
+}
+
+.chip-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+    background: #4a4a4a; color: #fff; border: none; padding: 6px 10px; border-radius: 8px;
+    font-size: 12px; cursor: pointer; transition: transform .05s ease;
+}
+.chip:hover { transform: translateY(-1px); }
+.chip.is-active { background: #ff6b6b; }
+
+.btn {
+    background: #2e2e2e; color: #fff; border: 1px solid #444;
+    padding: 6px 10px; border-radius: 8px; cursor: pointer; font-size: 12px;
+}
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn--primary { background: #3b82f6; border-color: #3b82f6; }
+.btn--danger { background: #ef4444; border-color: #ef4444; }
+
+.muted { opacity: .85; }
+
+.pagination { display: flex; align-items: center; gap: 8px; }
+.page-size select {
+    padding: 4px 6px; border-radius: 6px; border: 1px solid #444; background: #222; color:#fff;
+}
+
+/* 显示控制面板按钮（面板隐藏时） */
+.l2d-toggle {
+    position: absolute; top: 20px; right: 20px; z-index: 20;
+    background: rgba(0,0,0,.8); color: #fff; border: none;
+    padding: 10px 14px; border-radius: 8px; cursor: pointer;
+}
+
+/* ========== 底部时间线 ========== */
+.l2d-timeline {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 10;
+}
+
+/* —— 时间线具体样式 —— */
+.tl-root {
+    background: rgba(0,0,0,.9);
+    border-top: 1px solid #333;
+    padding: 8px 12px 12px;
+    user-select: none;
+}
+
+.tl-toolbar {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+}
+.tl-zoom { min-width: 70px; text-align: center; color:#ddd; }
+
+.tl-ruler {
+    position: relative;
+    height: 26px;
+    background: #151515;
+    border: 1px solid #2a2a2a;
+    border-radius: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    margin-bottom: 6px;
+}
+.tl-ruler-inner { position: relative; height: 100%; }
+.tl-tick { position: absolute; top: 0; bottom: 0; width: 1px; }
+.tl-tick-major { position: absolute; left: 0; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,.08); }
+.tl-tick-sub { position: absolute; top: 8px; bottom: 0; width: 1px; background: rgba(255,255,255,.05); }
+.tl-tick-label { position: absolute; top: 2px; left: 4px; font-size: 11px; color: #bbb; }
+
+.tl-track { margin-top: 6px; }
+.tl-title { font-size: 12px; opacity: .8; margin-bottom: 4px; }
+
+/* 轨道容器：固定高、只横向滚动 */
+.tl-lane {
+    position: relative;
+    height: 56px;              /* = TRACK_H */
+    background: #1c1c1c;
+    border-radius: 6px;
+
+    overflow-x: auto;          /* 只保留横向滚动 */
+    overflow-y: hidden;        /* 禁用竖向滚动 —— 关键 */
+    scrollbar-gutter: stable both-edges; /* 防止滚动条出现/消失引起抖动 */
+
+    /* ↓ 可删 */
+    /* white-space: nowrap; */
+}
+
+.tl-grid { position: relative; height: 100%; }
+.tl-grid-line { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,.06); }
+
+.tl-clips { position: relative; }
+
+.tl-clip {
+    position: absolute; display: flex; align-items: center; gap: 8px;
+    padding: 0 8px; color: #fff; border-radius: 6px;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.12);
+}
+.tl-clip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; font-size: 12px; }
+.tl-clip-dur { font-size: 11px; opacity: .8; }
+.tl-clip-remove {
+    margin-left: 4px; padding: 2px 6px; border: none; border-radius: 4px;
+    background: rgba(0,0,0,.25); color: #fff; cursor: pointer;
+}
+
+.tl-handle {
+    position: absolute; top: 0; bottom: 0;
+    background: rgba(0,0,0,.25);
+    cursor: ew-resize;
+}
+.tl-handle--l { left: 0; border-top-left-radius: 6px; border-bottom-left-radius: 6px; }
+.tl-handle--r { right: 0; border-top-right-radius: 6px; border-bottom-right-radius: 6px; }
+
+.tl-playhead {
+    position: absolute; top: 0; bottom: 0; width: 2px; background: #ffeb3b;
+}
+/* 三层都堆叠铺满高度 */
+.tl-grid,
+.tl-clips,
+.tl-playhead {
+    position: absolute;
+    top: 0;
+    bottom: 0;   /* 撑满 tl-lane 的高度 */
+}
+
+/* 网格 & 片段区域的基本定位 */
+.tl-grid,
+.tl-clips {
+    left: 0;
+    height: 100%;
+}
+
+/* 网格线全高 */
+.tl-grid-line {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+}
+
+/* 播放头本来就有 top/bottom:0，保留 */
