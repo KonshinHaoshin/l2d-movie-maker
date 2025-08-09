@@ -144,7 +144,11 @@
     /* white-space: nowrap; */
 }
 
-.tl-grid { position: relative; height: 100%; }
+.tl-grid {
+    position: relative;
+    height: 100%;
+    background: #1c1c1c;            /* 新增：与 tl-lane 一致或更深 */
+}
 .tl-grid-line { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(255,255,255,.06); }
 
 .tl-clips { position: relative; }
@@ -172,27 +176,46 @@
 .tl-playhead {
     position: absolute; top: 0; bottom: 0; width: 2px; background: #ffeb3b;
 }
-/* 三层都堆叠铺满高度 */
-.tl-grid,
-.tl-clips,
+
+
+/* 轨道容器 */
+.tl-lane {
+    position: relative;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
+/* 三层都绝对定位，并给清晰的层级 */
+.tl-grid {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background: #1c1c1c; /* 让网格层有底色，不会“发透” */
+}
+
+.tl-clips {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+}
+
 .tl-playhead {
     position: absolute;
     top: 0;
-    bottom: 0;   /* 撑满 tl-lane 的高度 */
+    bottom: 0;
+    width: 2px;
+    background: #ffeb3b;
+    z-index: 3;
 }
 
-/* 网格 & 片段区域的基本定位 */
-.tl-grid,
-.tl-clips {
-    left: 0;
-    height: 100%;
-}
-
-/* 网格线全高 */
+/* 网格线撑满高度 */
 .tl-grid-line {
     position: absolute;
     top: 0;
     bottom: 0;
+    width: 1px;
+    background: rgba(255,255,255,.06);
 }
 
-/* 播放头本来就有 top/bottom:0，保留 */
+/* 便于肉眼确认（可删） */
+.tl-clip { box-shadow: inset 0 0 0 1px rgba(255,255,255,.2); }

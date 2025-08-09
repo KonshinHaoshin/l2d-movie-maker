@@ -9,6 +9,13 @@ import { parseMtn } from "../utils/parseMtn";
 import "./Live2DView.css";
 import ControlPanel from "./panel/ControlPanel";
 
+// ✅ 新的录制/导出工具（Tauri v2）
+import {
+    createPngFrameRecorder,
+    pickAndEncodeWebMAlpha,
+    pickAndEncodeProRes4444,
+} from "../utils/recorder";
+
 interface Motion { name: string; file: string; }
 interface Expression { name: string; file: string; }
 interface ModelData {
@@ -17,8 +24,6 @@ interface ModelData {
 }
 
 const JSON_URL = "/model/anon/model.json";
-
-// group -> 秒
 type MotionLenMap = Record<string, number>;
 
 export default function Live2DView() {
@@ -43,20 +48,23 @@ export default function Live2DView() {
     const firedRef = useRef<Set<string>>(new Set());
 
     // 默认时长（兜底）
-    const [motionDur, setMotionDur] = useState(2);   // s
-    const [exprDur, setExprDur] = useState(0.8);     // s
+    const [motionDur, setMotionDur] = useState(2);
+    const [exprDur, setExprDur] = useState(0.8);
 
     // 解析得到的每组 motion 的真实时长
     const [motionLen, setMotionLen] = useState<MotionLenMap>({});
 
+    // —— 录帧 / 导出 —— //
+    const FPS = 30;
+    const frameRecRef = useRef<ReturnType<typeof createPngFrameRecorder> | null>(null);
+    const [recStatus, setRecStatus] = useState<"idle" | "rec" | "done">("idle");
+    const [tempSubdir, setTempSubdir] = useState<string | null>(null);
+    const [frameCount, setFrameCount] = useState(0);
+    const [isEncoding, setIsEncoding] = useState(false);
+
     const clearTimeline = () => { setMotionClips([]); setExprClips([]); setPlayhead(0); };
 
-    // 拖动/裁剪后修改片段
-    const changeClip = (
-        track: TrackKind,
-        id: string,
-        patch: Partial<Pick<Clip, "start" | "duration">>
-    ) => {
+    const changeClip = (track: TrackKind, id: string, patch: Partial<Pick<Clip, "start" | "duration">>) => {
         if (track === "motion") {
             setMotionClips(prev => prev.map(c => (c.id === id ? { ...c, ...patch } : c)));
         } else {
@@ -65,6 +73,48 @@ export default function Live2DView() {
     };
 
     const setPlayheadSec = (sec: number) => setPlayhead(sec);
+
+    // ===== 录制为 PNG 帧（含透明） =====
+    const startRecordTimeline = async () => {
+        if (!canvasRef.current) return;
+        if (!isPlaying) startPlayback(); // 播放从头开始
+        const rec = createPngFrameRecorder(canvasRef.current, FPS);
+        frameRecRef.current = rec;
+        const { tempSubdir } = await rec.start("l2d_alpha");
+        setTempSubdir(tempSubdir);
+        setRecStatus("rec");
+
+        // 自动在时间线末尾停止
+        if (timelineLength > 0) {
+            setTimeout(async () => {
+                if (!frameRecRef.current) return;
+                const { frames } = await frameRecRef.current.stop();
+                setFrameCount(frames);
+                setRecStatus("done");
+                stopPlayback();
+            }, Math.ceil(timelineLength * 1000) + 60);
+        }
+    };
+
+    const stopRecord = async () => {
+        if (!frameRecRef.current) return;
+        const { frames } = await frameRecRef.current.stop();
+        setFrameCount(frames);
+        setRecStatus("done");
+        stopPlayback();
+    };
+
+    const exportWebM = async () => {
+        if (!tempSubdir) return;
+        setIsEncoding(true);
+        try { await pickAndEncodeWebMAlpha(tempSubdir, FPS); } finally { setIsEncoding(false); }
+    };
+
+    const exportProRes = async () => {
+        if (!tempSubdir) return;
+        setIsEncoding(true);
+        try { await pickAndEncodeProRes4444(tempSubdir, FPS); } finally { setIsEncoding(false); }
+    };
 
     // ————————————————————————————————————————————
     // 初始化 PIXI & Live2D
@@ -78,7 +128,10 @@ export default function Live2DView() {
 
             (window as any).PIXI = PIXI;
             const app = new PIXI.Application({
-                view: canvasRef.current, backgroundAlpha: 0, resizeTo: window,
+                view: canvasRef.current,
+                backgroundAlpha: 0,          // 透明底
+                resizeTo: window,
+                preserveDrawingBuffer: true, // 允许 toBlob 读取像素
             });
 
             try {
@@ -95,10 +148,8 @@ export default function Live2DView() {
                 model.scale.set(0.3);
                 model.position.set(app.screen.width / 2, app.screen.height / 2);
 
-                // 关闭自动交互（鼠标跟随）
                 (model as any).autoInteract = false;
 
-                // 禁用头部旋转（保留呼吸等自然动）
                 const im = (model as any).internalModel as any;
                 if (im) {
                     ["angleXParamIndex", "angleYParamIndex", "angleZParamIndex"].forEach((k) => {
@@ -108,10 +159,8 @@ export default function Live2DView() {
 
                 app.stage.addChild(model);
 
-                // 拖拽
                 if (enableDragging) makeDraggable(model);
 
-                // 自适应
                 resizeHandler = () => model.position.set(app.screen.width / 2, app.screen.height / 2);
                 window.addEventListener("resize", resizeHandler);
             } catch (err) {
@@ -133,9 +182,7 @@ export default function Live2DView() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [enableDragging]);
 
-    // ————————————————————————————————————————————
-    // 解析 .mtn：为每个 motion 组预取真实时长（秒）
-    // ————————————————————————————————————————————
+    // 解析 .mtn：预取真实时长（秒）
     useEffect(() => {
         if (!modelData) return;
         let aborted = false;
@@ -143,13 +190,13 @@ export default function Live2DView() {
         const base = JSON_URL.slice(0, JSON_URL.lastIndexOf("/") + 1);
         const resolveUrl = (rel: string) => {
             if (/^https?:\/\//i.test(rel)) return rel;
-            if (rel.startsWith("/")) return rel;               // 已是绝对路径
+            if (rel.startsWith("/")) return rel;
             if (rel.startsWith("./")) rel = rel.slice(2);
             return base + rel;
         };
 
         (async () => {
-            const entries = Object.entries(modelData.motions); // [group, Motion[]][]
+            const entries = Object.entries(modelData.motions);
             const results = await Promise.all(
                 entries.map(async ([group, arr]) => {
                     const first = arr?.[0]?.file;
@@ -170,56 +217,41 @@ export default function Live2DView() {
         return () => { aborted = true; };
     }, [modelData]);
 
-    // ————————————————————————————————————————————
-    // 播放调用
-    // ————————————————————————————————————————————
+    // 播放
     const playMotion = (group: string) => {
         const m = modelRef.current;
-        if (!m) return;
-        if (!modelData?.motions[group]) return;
+        if (!m || !modelData?.motions[group]) return;
         m.motion(group, 0, 3);
         setCurrentMotion(group);
     };
 
     const applyExpression = (name: string) => {
         const m = modelRef.current;
-        if (!m) return;
-        if (!modelData?.expressions?.length) return;
+        if (!m || !modelData?.expressions?.length) return;
         m.expression(name);
         setCurrentExpression(name);
     };
 
-    // ————————————————————————————————————————————
-    // 时间线：添加片段
-    // ————————————————————————————————————————————
-    const nextEnd = (clips: Clip[]) =>
-        clips.reduce((t, c) => Math.max(t, c.start + c.duration), 0);
+    // 添加片段
+    const nextEnd = (clips: Clip[]) => clips.reduce((t, c) => Math.max(t, c.start + c.duration), 0);
 
     const addMotionClip = async (name: string) => {
         if (!name) return;
-        const dur = motionLen[name] ?? motionDur; // 优先真实时长
-        setMotionClips((prev) => [
-            ...prev,
-            { id: crypto.randomUUID(), name, start: nextEnd(prev), duration: dur },
-        ]);
+        const dur = motionLen[name] ?? motionDur;
+        setMotionClips((prev) => [...prev, { id: crypto.randomUUID(), name, start: nextEnd(prev), duration: dur }]);
     };
 
     const addExprClip = (name: string) => {
         if (!name) return;
-        setExprClips((prev) => [
-            ...prev,
-            { id: crypto.randomUUID(), name, start: nextEnd(prev), duration: exprDur },
-        ]);
+        setExprClips((prev) => [...prev, { id: crypto.randomUUID(), name, start: nextEnd(prev), duration: exprDur }]);
     };
 
-    // ————————————————————————————————————————————
-    // 时间线：播放控制
-    // ————————————————————————————————————————————
+    // 时间线播放控制
     const timelineLength = Math.max(nextEnd(motionClips), nextEnd(exprClips));
 
     const tick = (ts: number) => {
         if (startTsRef.current == null) startTsRef.current = ts;
-        const t = (ts - startTsRef.current) / 1000; // 秒
+        const t = (ts - startTsRef.current) / 1000;
         setPlayhead(t);
 
         for (const c of motionClips) {
@@ -258,9 +290,7 @@ export default function Live2DView() {
         setIsPlaying(false);
     };
 
-    // ————————————————————————————————————————————
     // 拖拽
-    // ————————————————————————————————————————————
     const makeDraggable = (model: any) => {
         model.interactive = true;
         model.buttonMode = true;
@@ -291,32 +321,60 @@ export default function Live2DView() {
                 <canvas ref={canvasRef} className="l2d-stage-canvas" />
             </div>
 
+            {/* 导出工具条（右下角） */}
+            <div style={{
+                position: "absolute", right: 16, bottom: 160, zIndex: 25,
+                background: "rgba(0,0,0,.85)", color: "#fff", padding: 12,
+                borderRadius: 10, display: "flex", gap: 8, alignItems: "center"
+            }}>
+                {recStatus !== "rec" ? (
+                    <button onClick={startRecordTimeline}
+                            style={{ padding: "6px 10px", borderRadius: 6, border: "none", cursor: "pointer" }}>
+                        ⬤ 录制时间线
+                    </button>
+                ) : (
+                    <button onClick={stopRecord}
+                            style={{ padding: "6px 10px", borderRadius: 6, border: "none", cursor: "pointer", background: "#ff6b6b", color: "#fff" }}>
+                        ■ 停止
+                    </button>
+                )}
+
+                <span style={{ opacity: .8, fontSize: 12 }}>
+          {recStatus === "idle" && "未录制"}
+                    {recStatus === "rec" && "录制中...（PNG 帧）"}
+                    {recStatus === "done" && (tempSubdir ? `已抓取 ${frameCount} 帧` : "已结束")}
+        </span>
+
+                <button onClick={exportWebM} disabled={recStatus !== "done" || isEncoding}
+                        style={{ padding: "6px 10px", borderRadius: 6, border: "none", cursor: "pointer" }}>
+                    {isEncoding ? "导出中…" : "➡ WebM（VP9+Alpha）"}
+                </button>
+
+                <button onClick={exportProRes} disabled={recStatus !== "done" || isEncoding}
+                        style={{ padding: "6px 10px", borderRadius: 6, border: "none", cursor: "pointer" }}>
+                    {isEncoding ? "导出中…" : "➡ MOV（ProRes 4444）"}
+                </button>
+            </div>
+
             {/* 控制面板 */}
             {showControls && (
                 <ControlPanel
                     onClose={() => setShowControls(false)}
-
                     modelData={modelData}
                     motionLen={motionLen}
-
                     currentMotion={currentMotion}
                     currentExpression={currentExpression}
-
                     motionDur={motionDur}
                     exprDur={exprDur}
                     setMotionDur={setMotionDur}
                     setExprDur={setExprDur}
-
                     chooseMotion={(name) => { playMotion(name); setCurrentMotion(name); }}
                     chooseExpression={(name) => { applyExpression(name); setCurrentExpression(name); }}
-
                     addMotionClip={addMotionClip}
                     addExprClip={addExprClip}
-
                     enableDragging={enableDragging}
                     setEnableDragging={setEnableDragging}
                     isDragging={isDragging}
-
                     timelineLength={timelineLength}
                     playhead={playhead}
                     isPlaying={isPlaying}
@@ -338,11 +396,9 @@ export default function Live2DView() {
                         else setExprClips(prev => prev.filter(c => c.id !== id));
                     }}
                     onSetPlayhead={setPlayheadSec}
-                    // 可不传 pixelsPerSec，内部自管（支持Alt+滚轮/按钮缩放）
                 />
             </div>
 
-            {/* 收起按钮 */}
             {!showControls && (
                 <button className="l2d-toggle" onClick={() => setShowControls(true)}>
                     🎛️ 显示控制面板
