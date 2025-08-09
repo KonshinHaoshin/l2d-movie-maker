@@ -28,7 +28,7 @@ const Live2DView = () => {
     const [isDragging, setIsDragging] = useState<boolean>(false);
 
     useEffect(() => {
-     
+
        const run = async () => {
             if (!canvasRef.current) {
                 console.error("❌ canvasRef is null");
@@ -46,6 +46,7 @@ const Live2DView = () => {
             try {
                 console.log("📦 正在加载模型...");
                 const model = await Live2DModel.from("/model/anon/model.json");
+
                 modelRef.current = model;
 
                 // 加载模型数据
@@ -56,6 +57,24 @@ const Live2DView = () => {
                 model.anchor.set(0.5, 0.5);
                 model.scale.set(0.3);
                 model.position.set(app.screen.width / 2, app.screen.height / 2);
+
+                // 这是我想出来的最抽象的解决鼠标跟踪的方法，不许笑！
+                {
+                    const im = (model as any).internalModel as any;
+                    if (im) {
+                        ([
+                            "angleXParamIndex",
+                            "angleYParamIndex",
+                            "angleZParamIndex",
+                            "bodyAngleXParamIndex",
+                            "eyeballYParamIndex",
+                            "eyeballXParamIndex",
+                        ] as const).forEach((k) => {
+                            if (typeof im[k] === "number") im[k] = -1;
+                        });
+                    }
+                }
+
 
                 app.stage.addChild(model);
 
@@ -94,7 +113,7 @@ const Live2DView = () => {
             // 调用 motion 方法，传入动画索引和优先级
             modelRef.current.motion(motionName, 0, 3); // 默认动画索引和优先级
             setCurrentMotion(motionName);
-            
+
             console.log(`🎬 播放动作: ${motionName}, 索引: 0, 优先级: 3`);
         }
     };
@@ -106,7 +125,7 @@ const Live2DView = () => {
                 // 使用类似提供的代码中的方式来设置表情
                 modelRef.current.expression(expressionName);
                 setCurrentExpression(expressionName);
-                
+
                 console.log(`😊 设置表情: ${expressionName}`);
             }
         }
@@ -116,7 +135,7 @@ const Live2DView = () => {
     const makeDraggable = (model: any) => {
         model.interactive = true;
         model.buttonMode = true;
-        
+
         model.on("pointerdown", (e: any) => {
             setIsDragging(true);
             model.dragging = true;
@@ -124,20 +143,20 @@ const Live2DView = () => {
             model._pointerY = e.data.global.y - model.y;
             console.log("🖱️ 开始拖拽");
         });
-        
+
         model.on("pointermove", (e: any) => {
             if (model.dragging) {
                 model.position.x = e.data.global.x - model._pointerX;
                 model.position.y = e.data.global.y - model._pointerY;
             }
         });
-        
+
         model.on("pointerup", () => {
             setIsDragging(false);
             model.dragging = false;
             console.log("✅ 拖拽结束");
         });
-        
+
         model.on("pointerupoutside", () => {
             setIsDragging(false);
             model.dragging = false;
@@ -171,7 +190,7 @@ const Live2DView = () => {
                 ref={canvasRef}
                 style={{ width: "100%", height: "100%", display: "block" }}
             />
-            
+
             {/* 控制面板 */}
             {showControls && (
                 <div style={{
@@ -273,9 +292,9 @@ const Live2DView = () => {
                             </label>
                         </div>
                         {isDragging && (
-                            <div style={{ 
-                                fontSize: "11px", 
-                                color: "#87ceeb", 
+                            <div style={{
+                                fontSize: "11px",
+                                color: "#87ceeb",
                                 marginTop: "5px",
                                 fontStyle: "italic"
                             }}>
@@ -285,9 +304,9 @@ const Live2DView = () => {
                     </div>
 
                     {/* 当前状态显示 */}
-                    <div style={{ 
-                        background: "rgba(255, 255, 255, 0.1)", 
-                        padding: "10px", 
+                    <div style={{
+                        background: "rgba(255, 255, 255, 0.1)",
+                        padding: "10px",
                         borderRadius: "5px",
                         fontSize: "12px"
                     }}>
