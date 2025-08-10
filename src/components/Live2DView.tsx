@@ -1,3 +1,4 @@
+// src/components/Live2DView.tsx
 import { useEffect, useRef, useState } from "react";
 import * as PIXI from "pixi.js";
 import { Live2DModel } from "pixi-live2d-display";
@@ -9,13 +10,11 @@ import { parseMtn } from "../utils/parseMtn";
 import "./Live2DView.css";
 import ControlPanel from "./panel/ControlPanel";
 
-// ✅ 新的录制/导出工具（Tauri v2）
-import {
-    createPngFrameRecorder,
-    pickAndEncodeWebMAlpha,
-    pickAndEncodeProRes4444,
-} from "../utils/recorder";
-
+import { createVp9AlphaRecorder, isVp9AlphaSupported } from "../utils/recorder";
+import {invoke} from "@tauri-apps/api/core";
+import {save} from "@tauri-apps/plugin-dialog";
+import {appCacheDir, BaseDirectory, join} from "@tauri-apps/api/path";
+import {writeFile} from "@tauri-apps/plugin-fs";
 interface Motion { name: string; file: string; }
 interface Expression { name: string; file: string; }
 interface ModelData {
@@ -54,70 +53,66 @@ export default function Live2DView() {
     // 解析得到的每组 motion 的真实时长
     const [motionLen, setMotionLen] = useState<MotionLenMap>({});
 
-    // —— 录帧 / 导出 —— //
-    const FPS = 30;
-    const frameRecRef = useRef<ReturnType<typeof createPngFrameRecorder> | null>(null);
-    const [recStatus, setRecStatus] = useState<"idle" | "rec" | "done">("idle");
-    const [tempSubdir, setTempSubdir] = useState<string | null>(null);
-    const [frameCount, setFrameCount] = useState(0);
-    const [isEncoding, setIsEncoding] = useState(false);
-
     const clearTimeline = () => { setMotionClips([]); setExprClips([]); setPlayhead(0); };
 
     const changeClip = (track: TrackKind, id: string, patch: Partial<Pick<Clip, "start" | "duration">>) => {
-        if (track === "motion") {
-            setMotionClips(prev => prev.map(c => (c.id === id ? { ...c, ...patch } : c)));
-        } else {
-            setExprClips(prev => prev.map(c => (c.id === id ? { ...c, ...patch } : c)));
-        }
+        if (track === "motion") setMotionClips(prev => prev.map(c => (c.id === id ? { ...c, ...patch } : c)));
+        else setExprClips(prev => prev.map(c => (c.id === id ? { ...c, ...patch } : c)));
     };
 
     const setPlayheadSec = (sec: number) => setPlayhead(sec);
 
-    // ===== 录制为 PNG 帧（含透明） =====
-    const startRecordTimeline = async () => {
+    // —— VP9 直录 & 导出 —— //
+    // const TARGET_FPS = 60;
+    const recRef = useRef<ReturnType<typeof createVp9AlphaRecorder> | null>(null);
+    const [recState, setRecState] = useState<"idle" | "rec" | "done">("idle");
+    // const [isExporting, setIsExporting] = useState(false);
+    // const [lastMovPath, setLastMovPath] = useState<string | null>(null); // 录完后得到的 MOV 绝对路径
+    // const [bgHex, setBgHex] = useState("#000000");
+
+    const [blob, setBlob] = useState<Blob|null>(null);
+
+    // 环境支持检测（按钮可用态/提示）
+
+    // 开始：先选 MOV 保存路径，再开始录制
+    const start = () => {
         if (!canvasRef.current) return;
-        if (!isPlaying) startPlayback(); // 播放从头开始
-        const rec = createPngFrameRecorder(canvasRef.current, FPS);
-        frameRecRef.current = rec;
-        const { tempSubdir } = await rec.start("l2d_alpha");
-        setTempSubdir(tempSubdir);
-        setRecStatus("rec");
-
-        // 自动在时间线末尾停止
-        if (timelineLength > 0) {
-            setTimeout(async () => {
-                if (!frameRecRef.current) return;
-                const { frames } = await frameRecRef.current.stop();
-                setFrameCount(frames);
-                setRecStatus("done");
-                stopPlayback();
-            }, Math.ceil(timelineLength * 1000) + 60);
-        }
+        if (!isVp9AlphaSupported()) { alert("此环境不支持 VP9 透明直录"); return; }
+        recRef.current = createVp9AlphaRecorder(canvasRef.current, 60, 16000);
+        recRef.current.start();
+        setRecState("rec");
+        // 如果你有时间线，记得播放并在末尾 stop()
     };
 
-    const stopRecord = async () => {
-        if (!frameRecRef.current) return;
-        const { frames } = await frameRecRef.current.stop();
-        setFrameCount(frames);
-        setRecStatus("done");
-        stopPlayback();
+// 停止
+    const stop = async () => {
+        if (!recRef.current) return;
+        const b = await recRef.current.stop();
+        setBlob(b);
+        setRecState("done");
     };
 
-    const exportWebM = async () => {
-        if (!tempSubdir) return;
-        setIsEncoding(true);
-        try { await pickAndEncodeWebMAlpha(tempSubdir, FPS); } finally { setIsEncoding(false); }
+// 直接保存 WebM（像 html 一样）
+    const saveWebM = async () => {
+        if (!recRef.current || !blob) return;
+        await recRef.current.saveWebM(blob);
     };
 
-    const exportProRes = async () => {
-        if (!tempSubdir) return;
-        setIsEncoding(true);
-        try { await pickAndEncodeProRes4444(tempSubdir, FPS); } finally { setIsEncoding(false); }
+// 可选：转 MOV（ProRes 4444）
+    const toMov = async () => {
+        if (!blob) return;
+        // 先缓存 webm 再转
+        const name = `alpha-${Date.now()}.webm`;
+        await writeFile(name, new Uint8Array(await blob.arrayBuffer()), { baseDir: BaseDirectory.AppCache });
+        const abs = await join(await appCacheDir(), name);
+
+        const out = await save({ defaultPath: "export-4444.mov", filters: [{ name: "MOV", extensions: ["mov"] }] });
+        if (!out) return;
+        await invoke("vp9_to_prores4444", { inWebm: abs, outMov: out });
     };
 
     // ————————————————————————————————————————————
-    // 初始化 PIXI & Live2D
+    // 初始化 PIXI & Live2D（单实例，透明画布）
     // ————————————————————————————————————————————
     useEffect(() => {
         let disposed = false;
@@ -129,10 +124,13 @@ export default function Live2DView() {
             (window as any).PIXI = PIXI;
             const app = new PIXI.Application({
                 view: canvasRef.current,
-                backgroundAlpha: 0,          // 透明底
+                backgroundAlpha: 0,          // 透明底（关键）
                 resizeTo: window,
-                preserveDrawingBuffer: true, // 允许 toBlob 读取像素
+                preserveDrawingBuffer: true, // 对 toBlob 有用；对 captureStream 可无
+                antialias: true,
             });
+            // Pixi v6：可用 clearBeforeRender；不要用 v7 的 renderer.background.alpha
+            (app.renderer as any).clearBeforeRender = true;
 
             try {
                 const model = await Live2DModel.from(JSON_URL);
@@ -158,7 +156,6 @@ export default function Live2DView() {
                 }
 
                 app.stage.addChild(model);
-
                 if (enableDragging) makeDraggable(model);
 
                 resizeHandler = () => model.position.set(app.screen.width / 2, app.screen.height / 2);
@@ -182,7 +179,9 @@ export default function Live2DView() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [enableDragging]);
 
+    // ————————————————————————————————————————————
     // 解析 .mtn：预取真实时长（秒）
+    // ————————————————————————————————————————————
     useEffect(() => {
         if (!modelData) return;
         let aborted = false;
@@ -217,7 +216,9 @@ export default function Live2DView() {
         return () => { aborted = true; };
     }, [modelData]);
 
-    // 播放
+    // ————————————————————————————————————————————
+    // 播放调用
+    // ————————————————————————————————————————————
     const playMotion = (group: string) => {
         const m = modelRef.current;
         if (!m || !modelData?.motions[group]) return;
@@ -232,7 +233,9 @@ export default function Live2DView() {
         setCurrentExpression(name);
     };
 
-    // 添加片段
+    // ————————————————————————————————————————————
+    // 时间线：添加片段
+    // ————————————————————————————————————————————
     const nextEnd = (clips: Clip[]) => clips.reduce((t, c) => Math.max(t, c.start + c.duration), 0);
 
     const addMotionClip = async (name: string) => {
@@ -246,7 +249,9 @@ export default function Live2DView() {
         setExprClips((prev) => [...prev, { id: crypto.randomUUID(), name, start: nextEnd(prev), duration: exprDur }]);
     };
 
-    // 时间线播放控制
+    // ————————————————————————————————————————————
+    // 时间线：播放控制
+    // ————————————————————————————————————————————
     const timelineLength = Math.max(nextEnd(motionClips), nextEnd(exprClips));
 
     const tick = (ts: number) => {
@@ -290,7 +295,9 @@ export default function Live2DView() {
         setIsPlaying(false);
     };
 
+    // ————————————————————————————————————————————
     // 拖拽
+    // ————————————————————————————————————————————
     const makeDraggable = (model: any) => {
         model.interactive = true;
         model.buttonMode = true;
@@ -322,39 +329,43 @@ export default function Live2DView() {
             </div>
 
             {/* 导出工具条（右下角） */}
-            <div style={{
-                position: "absolute", right: 16, bottom: 160, zIndex: 25,
-                background: "rgba(0,0,0,.85)", color: "#fff", padding: 12,
-                borderRadius: 10, display: "flex", gap: 8, alignItems: "center"
-            }}>
-                {recStatus !== "rec" ? (
-                    <button onClick={startRecordTimeline}
-                            style={{ padding: "6px 10px", borderRadius: 6, border: "none", cursor: "pointer" }}>
-                        ⬤ 录制时间线
+            <div
+                style={{
+                    position: "absolute",
+                    right: 16,
+                    bottom: 160,
+                    zIndex: 1000,            // ← 关键
+                    background: "rgba(0,0,0,.85)",
+                    color: "#fff",
+                    padding: 12,
+                    borderRadius: 10,
+                    display: "flex",
+                    gap: 8,
+                    alignItems: "center",
+                    flexWrap: "wrap",        // 小窗口不挤出屏幕
+                    pointerEvents: "auto",   // 防止父层禁用事件
+                }}
+            >
+                {recState !== "rec" ? (
+                    <button onClick={start} disabled={!isVp9AlphaSupported()}>
+                        ⬤ 开始录制（VP9 透明）
                     </button>
                 ) : (
-                    <button onClick={stopRecord}
-                            style={{ padding: "6px 10px", borderRadius: 6, border: "none", cursor: "pointer", background: "#ff6b6b", color: "#fff" }}>
+                    <button onClick={stop} style={{ background:"#ff6b6b", color:"#fff" }}>
                         ■ 停止
                     </button>
                 )}
 
-                <span style={{ opacity: .8, fontSize: 12 }}>
-          {recStatus === "idle" && "未录制"}
-                    {recStatus === "rec" && "录制中...（PNG 帧）"}
-                    {recStatus === "done" && (tempSubdir ? `已抓取 ${frameCount} 帧` : "已结束")}
-        </span>
-
-                <button onClick={exportWebM} disabled={recStatus !== "done" || isEncoding}
-                        style={{ padding: "6px 10px", borderRadius: 6, border: "none", cursor: "pointer" }}>
-                    {isEncoding ? "导出中…" : "➡ WebM（VP9+Alpha）"}
+                <button onClick={saveWebM} disabled={!blob}>
+                    下载 WebM（透明）
                 </button>
 
-                <button onClick={exportProRes} disabled={recStatus !== "done" || isEncoding}
-                        style={{ padding: "6px 10px", borderRadius: 6, border: "none", cursor: "pointer" }}>
-                    {isEncoding ? "导出中…" : "➡ MOV（ProRes 4444）"}
+                <button onClick={toMov} disabled={!blob}>
+                    转 MOV（ProRes 4444）
                 </button>
             </div>
+
+
 
             {/* 控制面板 */}
             {showControls && (
@@ -384,6 +395,8 @@ export default function Live2DView() {
                 />
             )}
 
+
+
             {/* 底部时间线 */}
             <div className="l2d-timeline">
                 <Timeline
@@ -398,6 +411,9 @@ export default function Live2DView() {
                     onSetPlayhead={setPlayheadSec}
                 />
             </div>
+
+
+
 
             {!showControls && (
                 <button className="l2d-toggle" onClick={() => setShowControls(true)}>

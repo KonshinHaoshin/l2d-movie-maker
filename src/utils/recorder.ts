@@ -1,84 +1,96 @@
-// src/utils/recorder.ts  —— Tauri v2
-// 功能：抓取 PNG 帧（含 alpha）到 AppCache / 选择保存位置 / 调用后端 ffmpeg 编码
-
-import { writeFile, mkdir, BaseDirectory } from "@tauri-apps/plugin-fs";
+// src/utils/recorder.ts
 import { save } from "@tauri-apps/plugin-dialog";
-import { appCacheDir, join } from "@tauri-apps/api/path";
-import { invoke } from "@tauri-apps/api/core";
+import { writeFile } from "@tauri-apps/plugin-fs";
 
-export type PngFrameRecorder = {
-    start: (subdir?: string) => Promise<{ tempSubdir: string }>;
-    stop: () => Promise<{ tempSubdir: string; frames: number }>;
-    readonly tempSubdir: string;
-};
+export function isVp9AlphaSupported() {
+    return !!(window as any).MediaRecorder?.isTypeSupported?.("video/webm;codecs=vp9");
+}
 
-export function createPngFrameRecorder(canvas: HTMLCanvasElement, fps = 30): PngFrameRecorder {
-    let running = false;
-    let timer: number | null = null;
-    let idx = 0;
-    let subdir = "";
+export function pickVp9Mime(): string | null {
+    if (MediaRecorder.isTypeSupported("video/webm;codecs=vp8")) return "video/webm;codecs=vp8"; // 先试 VP8
+    if (MediaRecorder.isTypeSupported("video/webm;codecs=vp9")) return "video/webm;codecs=vp9";
+    return "video/webm";
+}
 
-    async function grab() {
-        if (!running) return;
-        const blob: Blob = await new Promise((res) => canvas.toBlob((b) => res(b!), "image/png"));
-        const buf = new Uint8Array(await blob.arrayBuffer());
-        const name = `frame-${String(idx).padStart(6, "0")}.png`;
-        await writeFile(`${subdir}/${name}`, buf, { baseDir: BaseDirectory.AppCache });
-        idx++;
-        const delay = Math.max(0, 1000 / fps);
-        timer = window.setTimeout(grab, delay);
+export function createVp9AlphaRecorder(
+    canvas: HTMLCanvasElement,
+    fps = 60,
+    kbps = 16000,
+) {
+    let mr: MediaRecorder | null = null;
+    let chunks: BlobPart[] = [];
+    let ac: AudioContext | null = null;
+    let cs: ConstantSourceNode | null = null;
+
+    function makeStream(): MediaStream {
+        const s = canvas.captureStream(fps);
+        console.log("[rec] captureStream fps=", fps, "tracks=", s.getTracks().map(t => t.kind));
+        // 加一条静音音轨，避免部分实现不产块
+        try {
+            ac = new AudioContext();
+            cs = ac.createConstantSource();
+            const g = ac.createGain();
+            g.gain.value = 0;
+            const dest = ac.createMediaStreamDestination();
+            cs.connect(g).connect(dest);
+            cs.start();
+            const at = dest.stream.getAudioTracks()[0];
+            if (at) s.addTrack(at);
+            console.log("[rec] added silent audio track");
+        } catch (e) {
+            console.warn("[rec] audio track add failed (ok to ignore):", e);
+        }
+        return s;
     }
 
-    return {
-        async start(prefix = "alpha_record") {
-            subdir = `${prefix}-${Date.now()}`;
-            await mkdir(subdir, { baseDir: BaseDirectory.AppCache, recursive: true });
-            running = true; idx = 0; grab();
-            return { tempSubdir: subdir };
-        },
-        async stop() {
-            running = false;
-            if (timer) { clearTimeout(timer); timer = null; }
-            return { tempSubdir: subdir, frames: idx };
-        },
-        get tempSubdir() { return subdir; }
-    };
-}
+    function start() {
+        const mime = pickVp9Mime();
+        if (!mime) throw new Error("VP9/VP8 WebM not supported");
+        const stream = makeStream();
+        chunks = [];
+        mr = new MediaRecorder(stream, {
+            mimeType: mime,
+            videoBitsPerSecond: kbps * 1000,
+        });
+        mr.onerror = (e) => console.error("[rec] MediaRecorder error:", e);
+        // mr.onwarning = (e) => console.warn("[rec] MediaRecorder warning:", e);
+        mr.ondataavailable = (e) => {
+            if (e.data && e.data.size) {
+                chunks.push(e.data);
+            }
+        };
+        mr.onstart = () => console.log("[rec] started", mime);
+        mr.onstop = () => console.log("[rec] stopped, chunks:", chunks.length);
+        // 用 timeslice 让实现周期性产块，更稳
+        mr.start(250); // 每 250ms 产出一块
+    }
 
-// 取得绝对路径（传给 Rust 端）
-export async function getTempAbsDir(tempSubdir: string) {
-    const base = await appCacheDir();
-    return join(base, tempSubdir);
-}
+    function stop(): Promise<Blob> {
+        return new Promise((resolve) => {
+            if (!mr) return resolve(new Blob());
+            // 先请求一次数据，确保最后一块吐出来
+            try { mr.requestData(); } catch {}
+            mr.onstop = () => {
+                const blob = new Blob(chunks, { type: mr!.mimeType });
+                cleanup();
+                console.log("[rec] blob size:", blob.size);
+                resolve(blob);
+            };
+            mr.stop();
+        });
+    }
 
-// 选择导出：WebM（VP9+Alpha）
-export async function pickAndEncodeWebMAlpha(tempSubdir: string, fps = 30) {
-    const out = await save({
-        defaultPath: "export-alpha.webm",
-        filters: [{ name: "WebM", extensions: ["webm"] }],
-    });
-    if (!out) return;
-    const abs = await getTempAbsDir(tempSubdir);
-    await invoke("encode_alpha_video", {
-        tempDirAbs: abs,
-        fps,
-        outWebm: out,
-        outMov: null,
-    });
-}
+    function cleanup() {
+        try { cs?.stop(); } catch {}
+        try { ac?.close(); } catch {}
+        mr = null; cs = null; ac = null;
+    }
 
-// 选择导出：MOV（ProRes 4444）
-export async function pickAndEncodeProRes4444(tempSubdir: string, fps = 30) {
-    const out = await save({
-        defaultPath: "export-4444.mov",
-        filters: [{ name: "MOV", extensions: ["mov"] }],
-    });
-    if (!out) return;
-    const abs = await getTempAbsDir(tempSubdir);
-    await invoke("encode_alpha_video", {
-        tempDirAbs: abs,
-        fps,
-        outWebm: null,
-        outMov: out,
-    });
+    async function saveWebM(blob: Blob, defaultName = "export-alpha.webm") {
+        const out = await save({ defaultPath: defaultName, filters: [{ name: "WebM", extensions: ["webm"] }] });
+        if (!out) return;
+        await writeFile(out, new Uint8Array(await blob.arrayBuffer()));
+    }
+
+    return { start, stop, cleanup, saveWebM };
 }
