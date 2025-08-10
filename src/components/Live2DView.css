@@ -24,15 +24,16 @@
     top: 20px;
     right: 20px;
     z-index: 20;
-    background: rgba(0,0,0,.82);
-    color: #fff;
+    background: rgba(32, 32, 32, 0.95);
+    color: #e0e0e0;
     padding: 16px;
-    border-radius: 10px;
+    border-radius: 6px;
     max-width: 380px;
     max-height: 70vh;
     overflow: auto;
-    box-shadow: 0 8px 24px rgba(0,0,0,.35);
-    backdrop-filter: blur(6px);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(64, 64, 64, 0.8);
 }
 .l2d-panel-header {
     display: flex;
@@ -46,37 +47,98 @@
 }
 
 .l2d-section { margin: 12px 0; }
-.l2d-section-title { margin: 0 0 8px 0; color: #ffd700; font-size: 14px; }
+.l2d-section-title { 
+    margin: 0 0 8px 0; 
+    color: #f0f0f0; 
+    font-size: 14px; 
+    font-weight: 500;
+}
 .l2d-section-title-row {
     display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px;
 }
 
 .l2d-search input {
-    width: 160px; padding: 6px 8px; border-radius: 6px; border: 1px solid #444; background:#222; color:#fff;
+    width: 160px; 
+    padding: 6px 8px; 
+    border-radius: 4px; 
+    border: 1px solid #606060; 
+    background: #2a2a2a; 
+    color: #e0e0e0;
+    transition: border-color 0.2s ease;
+}
+
+.l2d-search input:focus {
+    border-color: #808080;
+    outline: none;
 }
 
 .row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .row.spread { justify-content: space-between; }
 
 .input {
-    width: 80px; padding: 6px 8px; border-radius: 6px; border: 1px solid #555; background: #222; color: #fff;
+    width: 80px; 
+    padding: 6px 8px; 
+    border-radius: 4px; 
+    border: 1px solid #606060; 
+    background: #2a2a2a; 
+    color: #e0e0e0;
+    transition: border-color 0.2s ease;
+}
+
+.input:focus {
+    border-color: #808080;
+    outline: none;
 }
 
 .chip-list { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip {
-    background: #4a4a4a; color: #fff; border: none; padding: 6px 10px; border-radius: 8px;
-    font-size: 12px; cursor: pointer; transition: transform .05s ease;
+    background: #404040; 
+    color: #e0e0e0; 
+    border: 1px solid #606060; 
+    padding: 6px 10px; 
+    border-radius: 4px;
+    font-size: 12px; 
+    cursor: pointer; 
+    transition: all 0.2s ease;
 }
-.chip:hover { transform: translateY(-1px); }
-.chip.is-active { background: #ff6b6b; }
+
+.chip:hover { 
+    background: #505050;
+    border-color: #707070;
+    transform: translateY(-1px); 
+}
+
+.chip.is-active { 
+    background: #606060; 
+    border-color: #808080;
+}
 
 .btn {
-    background: #2e2e2e; color: #fff; border: 1px solid #444;
-    padding: 6px 10px; border-radius: 8px; cursor: pointer; font-size: 12px;
+    background: #404040; 
+    color: #e0e0e0; 
+    border: 1px solid #606060;
+    padding: 6px 12px; 
+    border-radius: 4px; 
+    cursor: pointer; 
+    font-size: 12px;
+    transition: all 0.2s ease;
 }
+
+.btn:hover {
+    background: #505050;
+    border-color: #707070;
+}
+
 .btn:disabled { opacity: .5; cursor: not-allowed; }
-.btn--primary { background: #3b82f6; border-color: #3b82f6; }
-.btn--danger { background: #ef4444; border-color: #ef4444; }
+.btn--primary { 
+    background: #505050; 
+    border-color: #707070; 
+}
+
+.btn--danger { 
+    background: #5a2a2a; 
+    border-color: #7a3a3a; 
+}
 
 .muted { opacity: .85; }
 
@@ -87,9 +149,23 @@
 
 /* 显示控制面板按钮（面板隐藏时） */
 .l2d-toggle {
-    position: absolute; top: 20px; right: 20px; z-index: 20;
-    background: rgba(0,0,0,.8); color: #fff; border: none;
-    padding: 10px 14px; border-radius: 8px; cursor: pointer;
+    position: absolute; 
+    top: 20px; 
+    right: 20px; 
+    z-index: 20;
+    background: rgba(32, 32, 32, 0.95); 
+    color: #e0e0e0; 
+    border: 1px solid rgba(64, 64, 64, 0.8);
+    padding: 10px 14px; 
+    border-radius: 6px; 
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    transition: all 0.2s ease;
+}
+
+.l2d-toggle:hover {
+    background: rgba(40, 40, 40, 0.95);
+    border-color: rgba(80, 80, 80, 0.8);
 }
 
 /* ========== 底部时间线 ========== */
@@ -99,9 +175,9 @@
 
 /* —— 时间线具体样式 —— */
 .tl-root {
-    background: rgba(0,0,0,.9);
-    border-top: 1px solid #333;
-    padding: 8px 12px 12px;
+    background: rgba(24, 24, 24, 0.98);
+    border-top: 1px solid rgba(64, 64, 64, 0.8);
+    padding: 12px 16px 16px;
     user-select: none;
 }
 
@@ -161,8 +237,45 @@
 .tl-clip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; font-size: 12px; }
 .tl-clip-dur { font-size: 11px; opacity: .8; }
 .tl-clip-remove {
-    margin-left: 4px; padding: 2px 6px; border: none; border-radius: 4px;
-    background: rgba(0,0,0,.25); color: #fff; cursor: pointer;
+    margin-left: 4px; 
+    padding: 4px 8px !important; /* 增加padding，确保点击区域足够大 */
+    border: none; 
+    border-radius: 4px;
+    background: rgba(255, 0, 0, 0.9) !important; /* 更明显的红色背景 */
+    color: #fff !important; 
+    cursor: pointer !important;
+    font-size: 14px !important; /* 增加字体大小 */
+    font-weight: bold !important;
+    min-width: 24px !important; /* 增加最小宽度 */
+    min-height: 24px !important; /* 增加最小高度 */
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    transition: all 0.2s ease !important;
+    position: relative !important;
+    z-index: 1000 !important; /* 确保按钮在最上层 */
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3) !important;
+    user-select: none !important; /* 防止文本被选中 */
+    pointer-events: auto !important; /* 确保事件可以触发 */
+    /* 添加边框，使按钮更明显 */
+    border: 2px solid rgba(255, 255, 255, 0.3) !important;
+    /* 确保这是一个块级元素 */
+    box-sizing: border-box !important;
+    /* 添加一些额外的样式来确保可见性 */
+    text-align: center !important;
+    line-height: 1 !important;
+}
+
+.tl-clip-remove:hover {
+    background: rgba(255, 0, 0, 1) !important;
+    transform: scale(1.1) !important;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4) !important;
+    border-color: rgba(255, 255, 255, 0.6) !important;
+}
+
+.tl-clip-remove:active {
+    transform: scale(0.95) !important;
+    background: rgba(200, 0, 0, 1) !important;
 }
 
 .tl-handle {
@@ -226,23 +339,28 @@
     width: 100vw;
     height: 100vh;
     overflow: hidden;
-    /* 为底部时间线留出空间，类似于原来的l2d-stage */
-    padding-bottom: 160px;
+    /* 移除底部padding，因为模型已移动到左上角 */
+    padding-bottom: 0;
+    /* 整体缩放到三分之二 */
+    transform: scale(0.67);
+    transform-origin: top left;
+    /* 调整容器尺寸以适应缩放 */
+    width: 150vw;
+    height: 150vh;
 }
 
 .live2d-container canvas {
     background: transparent !important;
     display: block;
     position: absolute;
-    top: 0;
-    left: 0;
+    /* 移动到左上角，避免与时间线冲突 */
+    top: 20px;
+    left: 20px;
     /* 保持canvas原始尺寸，不拉伸 */
     width: auto;
     height: auto;
-    /* 居中显示 */
-    transform: translate(-50%, -50%);
-    top: 50%;
-    left: 50%;
+    /* 移除居中transform，使用左上角定位 */
+    transform: none;
 }
 
 /* 时间线定位到底部 */
@@ -252,4 +370,110 @@
     right: 0;
     bottom: 0;
     z-index: 10;
+    /* 调整时间线位置以适应缩放，移除translateY因为不再需要 */
+    transform: scale(1.5); /* 反向缩放，保持原始大小 */
+    transform-origin: bottom left;
+}
+
+/* 控制面板缩放调整 */
+.live2d-container .l2d-panel {
+    transform: scale(1.5); /* 反向缩放，保持原始大小 */
+    transform-origin: top right;
+}
+
+/* 导出工具条缩放调整 */
+.live2d-container .export-toolbar {
+    transform: scale(1.5); /* 反向缩放，保持原始大小 */
+    transform-origin: bottom right;
+}
+
+/* 时间线缩放调整 */
+.live2d-container .tl-root {
+    transform: scale(1.5); /* 反向缩放，保持原始大小 */
+    transform-origin: bottom left;
+}
+
+/* ========== 颜色主题调整 ========== */
+/* 控制面板 - 使用深灰色主题，类似PR */
+.live2d-container .l2d-panel {
+    background: rgba(32, 32, 32, 0.95) !important; /* 深灰色背景 */
+    border: 1px solid rgba(64, 64, 64, 0.8); /* 深灰色边框 */
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); /* 专业阴影 */
+}
+
+.live2d-container .l2d-panel .l2d-section-title {
+    color: #e0e0e0 !important; /* 浅灰色标题 */
+}
+
+.live2d-container .l2d-panel .btn--primary {
+    background: #404040 !important; /* 中灰色主按钮 */
+    border-color: #606060 !important;
+}
+
+/* 时间线 - 使用深色主题，类似PR时间线 */
+.live2d-container .tl-root {
+    background: rgba(24, 24, 24, 0.98) !important; /* 深黑色背景 */
+    border-top: 1px solid rgba(64, 64, 64, 0.8); /* 深灰色边框 */
+}
+
+.live2d-container .tl-root .tl-ruler {
+    background: #1a1a1a !important; /* 深黑色标尺 */
+    border-color: #404040 !important;
+}
+
+.live2d-container .tl-root .tl-lane {
+    background: #202020 !important; /* 深灰色轨道 */
+}
+
+.live2d-container .tl-root .tl-grid {
+    background: #202020 !important; /* 深灰色网格 */
+}
+
+.live2d-container .tl-root .tl-playhead {
+    background: #f0f0f0 !important; /* 白色播放头 */
+}
+
+/* 导出工具条 - 使用深灰色主题 */
+.live2d-container .export-toolbar {
+    background: rgba(32, 32, 32, 0.95) !important; /* 深灰色背景 */
+    border: 1px solid rgba(64, 64, 64, 0.8); /* 深灰色边框 */
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); /* 专业阴影 */
+}
+
+/* 显示控制面板按钮 - 使用深灰色主题 */
+.live2d-container .l2d-toggle {
+    background: rgba(32, 32, 32, 0.95) !important; /* 深灰色背景 */
+    border: 1px solid rgba(64, 64, 64, 0.8); /* 深灰色边框 */
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); /* 专业阴影 */
+}
+
+/* 时间线样式优化 */
+.tl-root {
+    background: rgba(24, 24, 24, 0.98);
+    border-top: 1px solid rgba(64, 64, 64, 0.8);
+    padding: 12px 16px 16px;
+    user-select: none;
+}
+
+.tl-ruler {
+    background: #1a1a1a;
+    border: 1px solid #404040;
+    border-radius: 4px;
+}
+
+.tl-lane {
+    background: #202020;
+    border-radius: 4px;
+    border: 1px solid #404040;
+}
+
+.tl-clip {
+    background: #404040;
+    border: 1px solid #606060;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.tl-clip:hover {
+    background: #505050;
+    border-color: #707070;
 }

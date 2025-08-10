@@ -16,9 +16,7 @@
         "height": 800,
         "resizable": true,
         "fullscreen": false,
-        "transparent": true,
-        "decorations": false
-      }
+        "transparent": true      }
     ],
     "security": {
       "csp": null,

@@ -478,14 +478,21 @@ export default function Live2DView() {
                 playheadSec={playhead}
                 onChangeClip={changeClip}
                 onRemoveClip={(track, id) => {
-                    if (track === "motion") setMotionClips(prev => prev.filter(c => c.id !== id));
-                    else setExprClips(prev => prev.filter(c => c.id !== id));
+                    console.log("🗑️ 执行删除操作:", { track, id });
+                    if (track === "motion") {
+                        console.log("🗑️ 删除动作片段，当前片段数:", motionClips.length);
+                        setMotionClips(prev => prev.filter(c => c.id !== id));
+                    } else {
+                        console.log("🗑️ 删除表情片段，当前片段数:", exprClips.length);
+                        setExprClips(prev => prev.filter(c => c.id !== id));
+                    }
                 }}
                 onSetPlayhead={setPlayheadSec}
             />
 
             {/* 导出工具条（右下角） */}
             <div
+                className="export-toolbar"
                 style={{
                     position: "absolute",
                     right: 16,

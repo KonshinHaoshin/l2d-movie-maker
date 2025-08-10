@@ -236,9 +236,43 @@ export default function Timeline({
                                     />
                                     <div className="tl-clip-name">{c.name}</div>
                                     <div className="tl-clip-dur">{c.duration.toFixed(2)}s</div>
-                                    <button className="tl-clip-remove" onClick={() => onRemoveClip(track, c.id)}>
+                                    <div 
+                                        className="tl-clip-remove" 
+                                        onClick={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            console.log("🗑️ 删除按钮被点击:", { track, id: c.id });
+                                            console.log("🗑️ 事件对象:", e);
+                                            console.log("🗑️ 目标元素:", e.target);
+                                            console.log("🗑️ 当前目标:", e.currentTarget);
+                                            onRemoveClip(track, c.id);
+                                        }}
+                                        onMouseDown={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            console.log("🗑️ 删除按钮被按下:", { track, id: c.id });
+                                        }}
+                                        style={{
+                                            cursor: 'pointer',
+                                            userSelect: 'none',
+                                            pointerEvents: 'auto',
+                                            background: 'red !important',
+                                            color: 'white !important',
+                                            padding: '4px 8px',
+                                            borderRadius: '4px',
+                                            fontSize: '14px',
+                                            fontWeight: 'bold',
+                                            minWidth: '24px',
+                                            minHeight: '24px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            border: '2px solid white',
+                                            zIndex: 9999
+                                        }}
+                                    >
                                         ✕
-                                    </button>
+                                    </div>
                                     <div
                                         className="tl-handle tl-handle--r"
                                         style={{ width: HANDLE_W }}
@@ -285,6 +319,25 @@ export default function Timeline({
                 disabled={lengthSec <= 0}
             >
                 适配内容
+            </button>
+            {/* 测试删除按钮 */}
+            <button 
+                className="btn" 
+                style={{ background: '#ff4444', color: '#fff' }}
+                onClick={() => {
+                    console.log("🧪 测试删除按钮被点击");
+                    if (motionClips.length > 0) {
+                        console.log("🧪 测试删除第一个动作片段");
+                        onRemoveClip("motion", motionClips[0].id);
+                    } else if (exprClips.length > 0) {
+                        console.log("🧪 测试删除第一个表情片段");
+                        onRemoveClip("expr", exprClips[0].id);
+                    } else {
+                        console.log("🧪 没有可删除的片段");
+                    }
+                }}
+            >
+                测试删除
             </button>
         </div>
     );
