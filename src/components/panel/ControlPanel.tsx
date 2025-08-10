@@ -279,6 +279,35 @@ const ControlPanel: React.FC<Props> = (props) => {
                     <button className="btn" onClick={clearTimeline}>🗑 清空</button>
                 </div>
             </div>
+
+            {/* 录制设置 */}
+            <div className="l2d-section">
+                <h4 className="l2d-section-title">🎥 录制设置</h4>
+                <div className="row" style={{ gap: 8, marginTop: 8 }}>
+                    <span>FPS:</span>
+                    <select className="input" style={{ width: 80 }}>
+                        <option value="30">30</option>
+                        <option value="60" selected>60</option>
+                        <option value="120">120</option>
+                    </select>
+                </div>
+                <div className="row" style={{ gap: 8, marginTop: 6 }}>
+                    <span>质量(kbps):</span>
+                    <select className="input" style={{ width: 80 }}>
+                        <option value="8000">8000</option>
+                        <option value="16000" selected>16000</option>
+                        <option value="32000">32000</option>
+                    </select>
+                </div>
+                <div className="row" style={{ gap: 8, marginTop: 6 }}>
+                    <span>格式:</span>
+                    <select className="input" style={{ width: 120 }}>
+                        <option value="vp9">VP9 (推荐)</option>
+                        <option value="vp8">VP8</option>
+                        <option value="webm">WebM</option>
+                    </select>
+                </div>
+            </div>
         </div>
     );
 };

@@ -28,6 +28,7 @@ type MotionLenMap = Record<string, number>;
 export default function Live2DView() {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const modelRef = useRef<Live2DModel | null>(null);
+    const appRef = useRef<PIXI.Application | null>(null);
 
     const [modelData, setModelData] = useState<ModelData | null>(null);
     const [currentMotion, setCurrentMotion] = useState<string>("");
@@ -66,6 +67,9 @@ export default function Live2DView() {
     // const TARGET_FPS = 60;
     const recRef = useRef<ReturnType<typeof createVp9AlphaRecorder> | null>(null);
     const [recState, setRecState] = useState<"idle" | "rec" | "done">("idle");
+    const [recordingTime, setRecordingTime] = useState(0);
+    const [recordingProgress, setRecordingProgress] = useState(0);
+    const [transparentBg, setTransparentBg] = useState(true);
     // const [isExporting, setIsExporting] = useState(false);
     // const [lastMovPath, setLastMovPath] = useState<string | null>(null); // 录完后得到的 MOV 绝对路径
     // const [bgHex, setBgHex] = useState("#000000");
@@ -75,13 +79,74 @@ export default function Live2DView() {
     // 环境支持检测（按钮可用态/提示）
 
     // 开始：先选 MOV 保存路径，再开始录制
-    const start = () => {
+    const start = async () => {
         if (!canvasRef.current) return;
-        if (!isVp9AlphaSupported()) { alert("此环境不支持 VP9 透明直录"); return; }
-        recRef.current = createVp9AlphaRecorder(canvasRef.current, 60, 16000);
+        if (!isVp9AlphaSupported()) { 
+            alert("此环境不支持 VP9 透明直录"); 
+            return; 
+        }
+        
+        // 调试信息：检查透明背景设置
+        console.log("🔍 透明背景调试信息:");
+        console.log("- transparentBg state:", transparentBg);
+        console.log("- canvas background:", canvasRef.current.style.background);
+        if (appRef.current) {
+            console.log("- PIXI renderer backgroundColor:", (appRef.current.renderer as any).backgroundColor);
+            console.log("- PIXI renderer backgroundAlpha:", (appRef.current.renderer as any).backgroundAlpha);
+            console.log("- PIXI renderer clearBeforeRender:", (appRef.current.renderer as any).clearBeforeRender);
+        }
+        
+        // 测试：创建一个简单的透明canvas来验证录制支持
+        const testCanvas = document.createElement('canvas');
+        testCanvas.width = 100;
+        testCanvas.height = 100;
+        testCanvas.style.background = 'transparent';
+        
+        const ctx = testCanvas.getContext('2d');
+        if (ctx) {
+            // 绘制一个半透明的红色圆圈
+            ctx.fillStyle = 'rgba(255, 0, 0, 0.5)';
+            ctx.beginPath();
+            ctx.arc(50, 50, 30, 0, Math.PI * 2);
+            ctx.fill();
+            
+            console.log("🔍 测试canvas创建:", testCanvas);
+            console.log("- testCanvas background:", testCanvas.style.background);
+            console.log("- testCanvas computed background:", window.getComputedStyle(testCanvas).background);
+        }
+        
+        // 检查时间线是否有内容
+        const totalDuration = Math.max(
+            motionClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
+            exprClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0)
+        );
+        
+        if (totalDuration <= 0) {
+            alert("请先在时间线中添加动作或表情片段");
+            return;
+        }
+        
+        recRef.current = createVp9AlphaRecorder(canvasRef.current, 60, 16000, {
+            onProgress: (time) => {
+                setRecordingTime(time);
+                setRecordingProgress((time / totalDuration) * 100);
+            }
+        });
+        
         recRef.current.start();
         setRecState("rec");
-        // 如果你有时间线，记得播放并在末尾 stop()
+        setRecordingTime(0);
+        setRecordingProgress(0);
+        
+        // 自动开始播放时间线
+        startPlayback();
+        
+        // 录制完成后自动停止
+        setTimeout(() => {
+            if (recState === "rec") {
+                stop();
+            }
+        }, totalDuration * 1000);
     };
 
 // 停止
@@ -90,6 +155,11 @@ export default function Live2DView() {
         const b = await recRef.current.stop();
         setBlob(b);
         setRecState("done");
+        setRecordingTime(0);
+        setRecordingProgress(0);
+        
+        // 停止播放
+        stopPlayback();
     };
 
 // 直接保存 WebM（像 html 一样）
@@ -122,15 +192,26 @@ export default function Live2DView() {
             if (!canvasRef.current) return;
 
             (window as any).PIXI = PIXI;
-            const app = new PIXI.Application({
+            let app = new PIXI.Application({
                 view: canvasRef.current,
                 backgroundAlpha: 0,          // 透明底（关键）
                 resizeTo: window,
                 preserveDrawingBuffer: true, // 对 toBlob 有用；对 captureStream 可无
                 antialias: true,
             });
-            // Pixi v6：可用 clearBeforeRender；不要用 v7 的 renderer.background.alpha
-            (app.renderer as any).clearBeforeRender = true;
+            appRef.current = app;
+            
+            // PIXI v6 的正确透明背景设置方式
+            if (transparentBg) {
+                (app.renderer as any).backgroundColor = 0x00000000; // 透明色
+                (app.renderer as any).backgroundAlpha = 0; // 透明
+                // 强制清除背景
+                (app.renderer as any).clearBeforeRender = true;
+            } else {
+                (app.renderer as any).backgroundColor = 0xf0f0f0; // 浅灰色
+                (app.renderer as any).backgroundAlpha = 1;
+                (app.renderer as any).clearBeforeRender = false;
+            }
 
             try {
                 const model = await Live2DModel.from(JSON_URL);
@@ -158,6 +239,15 @@ export default function Live2DView() {
                 app.stage.addChild(model);
                 if (enableDragging) makeDraggable(model);
 
+                            // 自定义渲染循环，确保透明背景
+            if (transparentBg) {
+                // 使用更简单的方法：直接设置WebGL清除颜色
+                const gl = (app.renderer as any).gl;
+                if (gl) {
+                    gl.clearColor(0, 0, 0, 0);
+                }
+            }
+
                 resizeHandler = () => model.position.set(app.screen.width / 2, app.screen.height / 2);
                 window.addEventListener("resize", resizeHandler);
             } catch (err) {
@@ -178,6 +268,22 @@ export default function Live2DView() {
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [enableDragging]);
+
+    // —— 透明背景切换 —— //
+    useEffect(() => {
+        if (appRef.current) {
+            if (transparentBg) {
+                (appRef.current.renderer as any).backgroundColor = 0x00000000; // 透明
+                (appRef.current.renderer as any).backgroundAlpha = 0;
+                // 强制清除背景
+                (appRef.current.renderer as any).clearBeforeRender = true;
+            } else {
+                (appRef.current.renderer as any).backgroundColor = 0xf0f0f0; // 浅灰色
+                (appRef.current.renderer as any).backgroundAlpha = 1;
+                (appRef.current.renderer as any).clearBeforeRender = false;
+            }
+        }
+    }, [transparentBg]);
 
     // ————————————————————————————————————————————
     // 解析 .mtn：预取真实时长（秒）
@@ -322,51 +428,16 @@ export default function Live2DView() {
     };
 
     return (
-        <div className="l2d-root">
-            {/* 画布区域 */}
-            <div className="l2d-stage">
-                <canvas ref={canvasRef} className="l2d-stage-canvas" />
-            </div>
-
-            {/* 导出工具条（右下角） */}
-            <div
-                style={{
-                    position: "absolute",
-                    right: 16,
-                    bottom: 160,
-                    zIndex: 1000,            // ← 关键
-                    background: "rgba(0,0,0,.85)",
-                    color: "#fff",
-                    padding: 12,
-                    borderRadius: 10,
-                    display: "flex",
-                    gap: 8,
-                    alignItems: "center",
-                    flexWrap: "wrap",        // 小窗口不挤出屏幕
-                    pointerEvents: "auto",   // 防止父层禁用事件
+        <div className="live2d-container">
+            <canvas 
+                ref={canvasRef} 
+                style={{ 
+                    background: 'transparent',
+                    display: 'block'
                 }}
-            >
-                {recState !== "rec" ? (
-                    <button onClick={start} disabled={!isVp9AlphaSupported()}>
-                        ⬤ 开始录制（VP9 透明）
-                    </button>
-                ) : (
-                    <button onClick={stop} style={{ background:"#ff6b6b", color:"#fff" }}>
-                        ■ 停止
-                    </button>
-                )}
-
-                <button onClick={saveWebM} disabled={!blob}>
-                    下载 WebM（透明）
-                </button>
-
-                <button onClick={toMov} disabled={!blob}>
-                    转 MOV（ProRes 4444）
-                </button>
-            </div>
-
-
-
+                data-transparent="true"
+            />
+            
             {/* 控制面板 */}
             {showControls && (
                 <ControlPanel
@@ -386,30 +457,151 @@ export default function Live2DView() {
                     enableDragging={enableDragging}
                     setEnableDragging={setEnableDragging}
                     isDragging={isDragging}
-                    timelineLength={timelineLength}
+                    timelineLength={Math.max(
+                        motionClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
+                        exprClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0)
+                    )}
                     playhead={playhead}
                     isPlaying={isPlaying}
                     startPlayback={startPlayback}
                     stopPlayback={stopPlayback}
                     clearTimeline={clearTimeline}
+                    onChangeClip={changeClip}
+                    onSetPlayhead={setPlayheadSec}
                 />
             )}
 
+            {/* 时间线 */}
+            <Timeline
+                motionClips={motionClips}
+                exprClips={exprClips}
+                playheadSec={playhead}
+                onChangeClip={changeClip}
+                onRemoveClip={(track, id) => {
+                    if (track === "motion") setMotionClips(prev => prev.filter(c => c.id !== id));
+                    else setExprClips(prev => prev.filter(c => c.id !== id));
+                }}
+                onSetPlayhead={setPlayheadSec}
+            />
 
+            {/* 导出工具条（右下角） */}
+            <div
+                style={{
+                    position: "absolute",
+                    right: 16,
+                    bottom: 160,
+                    zIndex: 1000,            // ← 关键
+                    background: "rgba(0,0,0,.85)",
+                    color: "#fff",
+                    padding: 12,
+                    borderRadius: 10,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                    alignItems: "stretch",
+                    minWidth: "200px",
+                    pointerEvents: "auto",   // 防止父层禁用事件
+                }}
+            >
+                {/* 透明背景切换 */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input
+                        type="checkbox"
+                        id="transparentBg"
+                        checked={transparentBg}
+                        onChange={(e) => setTransparentBg(e.target.checked)}
+                        style={{ width: 16, height: 16 }}
+                    />
+                    <label htmlFor="transparentBg" style={{ fontSize: "12px" }}>
+                        透明背景
+                    </label>
+                </div>
+                
+                {/* 录制控制 */}
+                {recState !== "rec" ? (
+                    <button 
+                        onClick={start} 
+                        disabled={!isVp9AlphaSupported()}
+                        style={{ 
+                            background: "#28a745", 
+                            color: "#fff", 
+                            border: "none", 
+                            padding: "8px 12px", 
+                            borderRadius: "4px",
+                            cursor: "pointer"
+                        }}
+                    >
+                        ⬤ 开始录制（VP9 透明）
+                    </button>
+                ) : (
+                    <button 
+                        onClick={stop} 
+                        style={{ 
+                            background: "#ff6b6b", 
+                            color: "#fff", 
+                            border: "none", 
+                            padding: "8px 12px", 
+                            borderRadius: "4px",
+                            cursor: "pointer"
+                        }}
+                    >
+                        ■ 停止录制
+                    </button>
+                )}
 
-            {/* 底部时间线 */}
-            <div className="l2d-timeline">
-                <Timeline
-                    motionClips={motionClips}
-                    exprClips={exprClips}
-                    playheadSec={playhead}
-                    onChangeClip={changeClip}
-                    onRemoveClip={(track, id) => {
-                        if (track === "motion") setMotionClips(prev => prev.filter(c => c.id !== id));
-                        else setExprClips(prev => prev.filter(c => c.id !== id));
+                {/* 录制进度 */}
+                {recState === "rec" && (
+                    <div style={{ fontSize: "12px", textAlign: "center" }}>
+                        <div>录制中... {recordingTime.toFixed(1)}s</div>
+                        <div style={{ 
+                            width: "100%", 
+                            height: "4px", 
+                            background: "#444", 
+                            borderRadius: "2px",
+                            overflow: "hidden"
+                        }}>
+                            <div style={{
+                                width: `${recordingProgress}%`,
+                                height: "100%",
+                                background: "#28a745",
+                                transition: "width 0.1s"
+                            }} />
+                        </div>
+                    </div>
+                )}
+
+                {/* 导出按钮 */}
+                <button 
+                    onClick={saveWebM} 
+                    disabled={!blob}
+                    style={{ 
+                        background: blob ? "#007bff" : "#6c757d", 
+                        color: "#fff", 
+                        border: "none", 
+                        padding: "6px 12px", 
+                        borderRadius: "4px",
+                        cursor: blob ? "pointer" : "not-allowed",
+                        fontSize: "12px"
                     }}
-                    onSetPlayhead={setPlayheadSec}
-                />
+                >
+                    下载 WebM（透明）
+                </button>
+
+                <button 
+                    onClick={toMov} 
+                    disabled={!blob}
+                    style={{ 
+                        background: blob ? "#6f42c1" : "#6c757d", 
+                        color: "#fff", 
+                        border: "none", 
+                        padding: "6px 12px", 
+                        borderRadius: "4px",
+                        cursor: blob ? "pointer" : "not-allowed",
+                        fontSize: "12px"
+                    }}
+                >
+                    转 MOV（ProRes 4444）
+                </button>
             </div>
 
 

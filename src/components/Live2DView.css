@@ -219,3 +219,37 @@
 
 /* 便于肉眼确认（可删） */
 .tl-clip { box-shadow: inset 0 0 0 1px rgba(255,255,255,.2); }
+
+/* ========== 透明背景支持 ========== */
+.live2d-container {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    /* 为底部时间线留出空间，类似于原来的l2d-stage */
+    padding-bottom: 160px;
+}
+
+.live2d-container canvas {
+    background: transparent !important;
+    display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+    /* 保持canvas原始尺寸，不拉伸 */
+    width: auto;
+    height: auto;
+    /* 居中显示 */
+    transform: translate(-50%, -50%);
+    top: 50%;
+    left: 50%;
+}
+
+/* 时间线定位到底部 */
+.live2d-container .tl-root {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 10;
+}
