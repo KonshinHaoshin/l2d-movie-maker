@@ -52,6 +52,14 @@ type Props = {
 
   clearTimeline: () => void;
 
+  // 录制控制
+  useModelFrame?: boolean;
+  setUseModelFrame?: (v: boolean) => void;
+  showFrameBorder?: boolean;
+  setShowFrameBorder?: (v: boolean) => void;
+  modelBounds?: { x: number; y: number; width: number; height: number };
+  setModelBounds?: (bounds: { x: number; y: number; width: number; height: number }) => void;
+
   onChangeClip?: (
     track: TrackKind,
     id: string,
@@ -328,9 +336,47 @@ const ControlPanel: React.FC<Props> = (props) => {
         </div>
       </div>
 
-      {/* 录制设置（占位，不动 UI） */}
+      {/* 录制设置 */}
       <div className="l2d-section">
         <h4 className="l2d-section-title">🎥 录制设置</h4>
+        
+        {/* 模型边框录制优化 */}
+        <div className="row" style={{ gap: 8, marginTop: 8, alignItems: "center" }}>
+          <label className="muted">
+            <input
+              type="checkbox"
+              checked={props.useModelFrame || false}
+              onChange={(e) => props.setUseModelFrame?.(e.target.checked)}
+              style={{ width: 16, height: 16, marginRight: 8 }}
+            />
+            启用模型边框录制优化
+          </label>
+        </div>
+        
+        {props.useModelFrame && (
+          <>
+            <div className="row" style={{ gap: 8, marginTop: 6, alignItems: "center" }}>
+              <label className="muted">
+                <input
+                  type="checkbox"
+                  checked={props.showFrameBorder || false}
+                  onChange={(e) => props.setShowFrameBorder?.(e.target.checked)}
+                  style={{ width: 16, height: 16, marginRight: 8 }}
+                />
+                显示录制区域边框
+              </label>
+            </div>
+            
+            {props.modelBounds && (
+              <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+                录制区域: {props.modelBounds.width.toFixed(0)} × {props.modelBounds.height.toFixed(0)} px
+                <br />
+                位置: ({props.modelBounds.x.toFixed(0)}, {props.modelBounds.y.toFixed(0)})
+              </div>
+            )}
+          </>
+        )}
+        
         <div className="row" style={{ gap: 8, marginTop: 8 }}>
           <span>FPS:</span>
           <select className="input" style={{ width: 80 }} defaultValue="60">

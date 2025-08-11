@@ -1,8 +1,10 @@
 // src-tauri/src/commands/server.rs
-use std::{path::{PathBuf}, thread, sync::OnceLock};
+use std::{path::{Path, PathBuf}, thread, sync::OnceLock, fs};
 use serde::Serialize;
+use serde_json::Value;
 use tiny_http::{Server, Response, Request};
 use mime_guess;
+use urlencoding;
 
 
 #[derive(Serialize)]
@@ -61,9 +63,19 @@ fn handle_req(req: Request, model_root: &PathBuf) {
         return;
     }
 
-    // 去掉开头的 /，拼到 model_root 下
-    let rel = &url[1..]; // "model/xxx"
-    let path = model_root.join(rel.strip_prefix("model/").unwrap_or(""));
+    // 去掉开头的 /model/，获取相对路径
+    let rel = url.strip_prefix("/model/").unwrap_or("");
+    
+    // 对相对路径进行URL解码，处理中文字符等非ASCII字符
+    let decoded_rel = match urlencoding::decode(rel) {
+        Ok(decoded) => decoded,
+        Err(_) => {
+            let _ = req.respond(Response::from_string("Invalid URL encoding").with_status_code(400));
+            return;
+        }
+    };
+    
+    let path = model_root.join(&*decoded_rel);
 
     // 禁止目录遍历
     if let Ok(canon) = path.canonicalize() {
@@ -93,31 +105,186 @@ fn handle_req(req: Request, model_root: &PathBuf) {
 fn scan_models_dir(models_dir: &PathBuf) -> Result<Vec<ModelEntry>, String> {
     let mut models = Vec::new();
     
-    // 遍历 model/ 下的所有子目录
-    for entry in std::fs::read_dir(models_dir).map_err(|e| format!("读取目录失败: {}", e))? {
-        let entry = entry.map_err(|e| format!("遍历目录失败: {}", e))?;
-        let path = entry.path();
-        
-        if path.is_dir() {
-            // 在每个子目录中查找 model.json
-            let model_json_path = path.join("model.json");
-            if model_json_path.exists() {
-                let label = path.file_name()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("unknown")
-                    .to_string();
-                
-                models.push(ModelEntry {
-                    label: format!("{}/model.json", label),
-                    path: format!("{}/model.json", label),
-                });
-            }
-        }
-    }
+    // 递归扫描所有子目录
+    scan_directory_recursive(models_dir, models_dir, &mut models)?;
     
     // 按名称排序
     models.sort_by(|a, b| a.label.to_lowercase().cmp(&b.label.to_lowercase()));
     Ok(models)
+}
+
+/// 递归扫描目录，查找Live2D模型文件和.jsonl文件
+fn scan_directory_recursive(
+    current_dir: &Path, 
+    base_dir: &Path, 
+    models: &mut Vec<ModelEntry>
+) -> Result<(), String> {
+    for entry in fs::read_dir(current_dir).map_err(|e| format!("读取目录失败: {}", e))? {
+        let entry = entry.map_err(|e| format!("遍历目录失败: {}", e))?;
+        let path = entry.path();
+        
+        if path.is_dir() {
+            // 递归扫描子目录
+            scan_directory_recursive(&path, base_dir, models)?;
+        } else if path.is_file() {
+            // 检查文件扩展名
+            if let Some(extension) = path.extension() {
+                let ext = extension.to_string_lossy().to_lowercase();
+                
+                match ext.as_str() {
+                    "json" => {
+                        // 检查是否为Live2D模型文件
+                        if is_live2d_model_file(&path)? {
+                            let relative_path = path.strip_prefix(base_dir)
+                                .map_err(|e| format!("路径处理失败: {}", e))?
+                                .to_string_lossy()
+                                .replace('\\', "/");
+                            
+                            let label = path.file_name()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or("unknown")
+                                .to_string();
+                            
+                            models.push(ModelEntry {
+                                label: format!("{} ({})", label, relative_path),
+                                path: relative_path,
+                            });
+                        }
+                    },
+                    "jsonl" => {
+                        // 检查是否为有效的.jsonl文件
+                        if is_valid_jsonl_file(&path)? {
+                            let relative_path = path.strip_prefix(base_dir)
+                                .map_err(|e| format!("路径处理失败: {}", e))?
+                                .to_string_lossy()
+                                .replace('\\', "/");
+                            
+                            let label = path.file_name()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or("unknown")
+                                .to_string();
+                            
+                            models.push(ModelEntry {
+                                label: format!("{} (JSONL)", label),
+                                path: relative_path,
+                            });
+                        }
+                    },
+                    "moc" | "moc3" => {
+                        // 检查是否有对应的配置文件
+                        if let Some(config_path) = find_model_config_for_moc(&path)? {
+                            let relative_path = config_path.strip_prefix(base_dir)
+                                .map_err(|e| format!("路径处理失败: {}", e))?
+                                .to_string_lossy()
+                                .replace('\\', "/");
+                            
+                            let label = path.file_name()
+                                .and_then(|s| s.to_str())
+                                .unwrap_or("unknown")
+                                .to_string();
+                            
+                            models.push(ModelEntry {
+                                label: format!("{} (MOC)", label),
+                                path: relative_path,
+                            });
+                        }
+                    },
+                    _ => {}
+                }
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+/// 检查文件是否为Live2D模型文件
+fn is_live2d_model_file(file_path: &Path) -> Result<bool, String> {
+    // 文件大小限制（10MB）
+    let metadata = fs::metadata(file_path)
+        .map_err(|e| format!("获取文件元数据失败: {}", e))?;
+    if metadata.len() > 10 * 1024 * 1024 {
+        return Ok(false);
+    }
+    
+    let content = fs::read_to_string(file_path)
+        .map_err(|e| format!("读取文件失败: {}", e))?;
+    
+    // 尝试解析JSON
+    let json: Value = serde_json::from_str(&content)
+        .map_err(|e| format!("JSON解析失败: {}", e))?;
+    
+    // Cubism2格式：包含"model"和"textures"字段
+    if json.get("model").is_some() && 
+       json.get("textures").and_then(|t| t.as_array()).map(|a| !a.is_empty()).unwrap_or(false) {
+        return Ok(true);
+    }
+    
+    // Cubism3/4格式：包含"FileReferences.Moc"字段
+    if let Some(file_refs) = json.get("FileReferences") {
+        if file_refs.get("Moc").is_some() {
+            return Ok(true);
+        }
+    }
+    
+    Ok(false)
+}
+
+/// 检查.jsonl文件是否有效
+fn is_valid_jsonl_file(file_path: &Path) -> Result<bool, String> {
+    // 文件大小限制（5MB）
+    let metadata = fs::metadata(file_path)
+        .map_err(|e| format!("获取文件元数据失败: {}", e))?;
+    if metadata.len() > 5 * 1024 * 1024 {
+        return Ok(false);
+    }
+    
+    let content = fs::read_to_string(file_path)
+        .map_err(|e| format!("读取文件失败: {}", e))?;
+    
+    let lines: Vec<&str> = content.lines().filter(|line| !line.trim().is_empty()).collect();
+    if lines.is_empty() {
+        return Ok(false);
+    }
+    
+    // 检查是否包含有效的JSON行
+    let mut has_valid_line = false;
+    for line in lines {
+        if let Ok(json) = serde_json::from_str::<Value>(line) {
+            // 检查是否包含模型相关字段
+            if json.get("path").is_some() || 
+               json.get("motions").is_some() || 
+               json.get("expressions").is_some() ||
+               json.get("model").is_some() {
+                has_valid_line = true;
+                break;
+            }
+        }
+    }
+    
+    Ok(has_valid_line)
+}
+
+/// 为.moc文件查找对应的配置文件
+fn find_model_config_for_moc(moc_path: &Path) -> Result<Option<PathBuf>, String> {
+    let parent_dir = moc_path.parent().ok_or("无法获取父目录")?;
+    
+    // 查找同目录下的配置文件
+    for entry in fs::read_dir(parent_dir).map_err(|e| format!("读取目录失败: {}", e))? {
+        let entry = entry.map_err(|e| format!("遍历目录失败: {}", e))?;
+        let path = entry.path();
+        
+        if path.is_file() {
+            if let Some(extension) = path.extension() {
+                let ext = extension.to_string_lossy().to_lowercase();
+                if ext == "json" && is_live2d_model_file(&path)? {
+                    return Ok(Some(path));
+                }
+            }
+        }
+    }
+    
+    Ok(None)
 }
 
 /// 生成并保存 models.json

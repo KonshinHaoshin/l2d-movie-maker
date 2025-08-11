@@ -8,9 +8,9 @@ use serde_json::Value;
 
 #[derive(Serialize)]
 pub struct ModelEntry {
-    /// 相对 root 的展示路径，例如 "tomori/casual-2023/model.json"
+    /// 相对 root 的展示路径，例如 "tomori/casual-2023/model.json" 或 "xxx/aggregate.jsonl"
     pub label: String,
-    /// 绝对路径（前端用 convertFileSrc 转 URL）
+    /// 绝对路径（前端可用 convertFileSrc 转 URL）
     pub abs_path: String,
     /// "json" | "jsonl"
     pub kind: String,
@@ -33,8 +33,10 @@ pub fn find_live2d_models(root: String) -> Result<Vec<ModelEntry>, String> {
                 .extension()
                 .and_then(|s| s.to_str())
                 .unwrap_or("")
-                .to_string();
+                .to_string()
+                .to_lowercase();
 
+            // 相对路径 label
             let label = file
                 .strip_prefix(&root)
                 .unwrap_or(&file)
@@ -63,9 +65,8 @@ fn get_json_and_jsonl(dir: &Path) -> Result<Vec<PathBuf>, String> {
         if path.is_dir() {
             continue;
         }
-        let is_json = path.extension().map(|e| e == "json").unwrap_or(false);
-        let is_jsonl = path.extension().map(|e| e == "jsonl").unwrap_or(false);
-        if !is_json && !is_jsonl {
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+        if ext != "json" && ext != "jsonl" {
             continue;
         }
 
@@ -81,40 +82,40 @@ fn get_json_and_jsonl(dir: &Path) -> Result<Vec<PathBuf>, String> {
     Ok(out)
 }
 
-/// 过滤出“看起来像 Live2D 模型”的文件：
+/// 过滤“看起来像 Live2D 模型/聚合”的文件：
 /// - .json：
-///     - Cubism2 旧格式：含 "model" 且 "textures"（数组）
+///     - Cubism2：含 "model" 且 "textures"（非空数组）
 ///     - Cubism3/4：FileReferences.Moc 存在 且 FileReferences.Textures 为非空数组
-/// - .jsonl：任意一行 parse 成 JSON 且含 "model"；或者行中含 "motions"/"expressions"（拼好模汇总）
-///   （我们只用于清单展示，前端仍只加载 .json）
+///     （⚠️ 不强制文件名叫 model.json）
+/// - .jsonl（聚合清单）：任意一行满足以下任一条件：
+///     - 含 "motions" 或 "expressions"（拼好模汇总行）
+///     - 含 "path" 为字符串，且以 ".json" 或 ".model3.json" 结尾（子模型行）
+///     - 含 "model" 字段（兼容少数工具产出的格式）
+/// 仅用于生成清单，具体加载逻辑由前端决定。
 fn filter_model_like(files: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
     let mut out = Vec::new();
 
     'each: for file in files {
-        // 添加文件大小检查，防止读取过大的文件
+        // 文件大小限制（10MB），避免读过大文件
         let metadata = fs::metadata(file)
             .map_err(|e| format!("获取文件元数据失败 '{}': {}", file.display(), e))?;
-        
-        // 限制文件大小为 10MB，防止内存溢出
         if metadata.len() > 10 * 1024 * 1024 {
             continue;
         }
 
-        let is_jsonl = file.extension().map(|e| e == "jsonl").unwrap_or(false);
+        let ext_jsonl = file.extension().map(|e| e == "jsonl").unwrap_or(false);
         let text = fs::read_to_string(file)
             .map_err(|e| format!("读取 '{}' 失败: {}", file.display(), e))?;
 
-        if is_jsonl {
+        if ext_jsonl {
+            // 逐行判定
             for line in text.lines() {
                 let l = line.trim();
                 if l.is_empty() {
                     continue;
                 }
                 if let Ok(v) = serde_json::from_str::<Value>(l) {
-                    if v.get("model").is_some()
-                        || v.get("motions").is_some()
-                        || v.get("expressions").is_some()
-                    {
+                    if is_jsonl_line_model_like(&v) {
                         out.push(file.clone());
                         continue 'each;
                     }
@@ -124,30 +125,55 @@ fn filter_model_like(files: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
             continue;
         }
 
-        // .json：尝试解析
+        // .json：尝试解析结构
         if let Ok(v) = serde_json::from_str::<Value>(&text) {
-            // 旧格式（Cubism2）
-            let old_ok = v.get("model").is_some()
-                && v.get("textures")
-                    .and_then(|t| t.as_array())
-                    .map(|a| !a.is_empty())
-                    .unwrap_or(false);
-
-            // Cubism3/4 (.model3.json)
-            let fr = v.get("FileReferences");
-            let c34_ok = fr
-                .and_then(|fr| fr.get("Moc"))
-                .is_some()
-                && fr.and_then(|fr| fr.get("Textures"))
-                    .and_then(|t| t.as_array())
-                    .map(|a| !a.is_empty())
-                    .unwrap_or(false);
-
-            if old_ok || c34_ok {
+            if is_live2d_json(&v) {
                 out.push(file.clone());
             }
         }
     }
 
     Ok(out)
+}
+
+/// 判定 .json 是否为 Live2D 模型（Cubism2/3/4）
+fn is_live2d_json(v: &Value) -> bool {
+    // 旧格式（Cubism2）
+    let old_ok = v.get("model").is_some()
+        && v.get("textures")
+            .and_then(|t| t.as_array())
+            .map(|a| !a.is_empty())
+            .unwrap_or(false);
+
+    // Cubism3/4 (.model3.json)
+    let fr = v.get("FileReferences");
+    let c34_ok = fr
+        .and_then(|fr| fr.get("Moc"))
+        .is_some()
+        && fr.and_then(|fr| fr.get("Textures"))
+            .and_then(|t| t.as_array())
+            .map(|a| !a.is_empty())
+            .unwrap_or(false);
+
+    old_ok || c34_ok
+}
+
+/// 判定 .jsonl 的某一行是否“像”聚合/模型声明
+fn is_jsonl_line_model_like(v: &Value) -> bool {
+    // 1) 汇总行：包含 motions / expressions
+    if v.get("motions").is_some() || v.get("expressions").is_some() {
+        return true;
+    }
+    // 2) 子模型声明：包含 path 且看起来指向一个 model.json / .model3.json
+    if let Some(p) = v.get("path").and_then(|p| p.as_str()) {
+        let p_lower = p.to_lowercase();
+        if p_lower.ends_with(".json") || p_lower.ends_with(".model3.json") {
+            return true;
+        }
+    }
+    // 3) 兼容：存在 "model" 字段（部分工具可能写成 { "model": "xxx.model3.json" }）
+    if v.get("model").is_some() {
+        return true;
+    }
+    false
 }

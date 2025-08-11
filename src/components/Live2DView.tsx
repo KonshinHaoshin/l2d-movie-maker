@@ -7,7 +7,7 @@ import type { Clip, TrackKind } from "./timeline/types";
 import { parseMtn } from "../utils/parseMtn";
 import "./Live2DView.css";
 import ControlPanel from "./panel/ControlPanel";
-import { createVp9AlphaRecorder, isVp9AlphaSupported } from "../utils/recorder";
+import { createVp9AlphaRecorder, createModelFrameRecorder, isVp9AlphaSupported } from "../utils/recorder";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { appCacheDir, BaseDirectory, join } from "@tauri-apps/api/path";
@@ -24,15 +24,21 @@ type MotionLenMap = Record<string, number>;
 
 export default function Live2DView() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const modelRef = useRef<Live2DModel | null>(null);
+  // 允许保存单模型或复合的子模型数组
+  const modelRef = useRef<Live2DModel | Live2DModel[] | null>(null);
   const appRef = useRef<PIXI.Application | null>(null);
+
+  // 复合（.jsonl）时的容器与标记、MTN 解析基准目录
+  const groupContainerRef = useRef<PIXI.Container | null>(null);
+  const isCompositeRef = useRef<boolean>(false);
+  const motionBaseRef = useRef<string | null>(null); // 用于解析 mtn 相对路径
 
   // 获取模型服务器信息
   const [assetBase, setAssetBase] = useState<string | null>(null);
 
   // —— 模型选择 —— //
   const [modelList, setModelList] = useState<string[]>([]);
-  const [selectedModel, setSelectedModel] = useState<string | null>(null); // 例如 "anon/model.json"
+  const [selectedModel, setSelectedModel] = useState<string | null>(null); // 例如 "anon/model.json" 或 "xxx/model.jsonl"
   const modelUrl = selectedModel && assetBase ? `${assetBase}/${selectedModel}` : null; // 最终 URL
 
   // —— 当前模型数据 —— //
@@ -70,12 +76,58 @@ export default function Live2DView() {
   const setPlayheadSec = (sec: number) => setPlayhead(sec);
 
   // —— 录制 —— //
-  const recRef = useRef<ReturnType<typeof createVp9AlphaRecorder> | null>(null);
+  const recRef = useRef<ReturnType<typeof createVp9AlphaRecorder> | ReturnType<typeof createModelFrameRecorder> | null>(null);
   const [recState, setRecState] = useState<"idle" | "rec" | "done">("idle");
   const [recordingTime, setRecordingTime] = useState(0);
   const [recordingProgress, setRecordingProgress] = useState(0);
   const [transparentBg, setTransparentBg] = useState(true);
   const [blob, setBlob] = useState<Blob | null>(null);
+  
+  // —— 模型边框录制 —— //
+  const [useModelFrame, setUseModelFrame] = useState(false);
+  const [showFrameBorder, setShowFrameBorder] = useState(true);
+  const [modelBounds, setModelBounds] = useState({ x: 0, y: 0, width: 800, height: 600 });
+
+  // —— 工具 —— //
+  const isJsonl = (u: string) => /\.jsonl(\?|#|$)/i.test(u);
+  const resolveRelativeFrom = (baseUrl: string, rel: string) => {
+    if (/^https?:\/\//i.test(rel)) return rel;
+    if (rel.startsWith("/")) return rel;
+    if (rel.startsWith("./")) rel = rel.slice(2);
+    const base = baseUrl.slice(0, baseUrl.lastIndexOf("/") + 1);
+    return base + rel;
+  };
+
+  const forEachModel = (fn: (m: Live2DModel) => void) => {
+    const cur = modelRef.current;
+    if (!cur) return;
+    if (Array.isArray(cur)) cur.forEach(fn);
+    else fn(cur as Live2DModel);
+  };
+
+  const cleanupCurrentModel = () => {
+    const app = appRef.current;
+    if (!app) return;
+    try {
+      if (Array.isArray(modelRef.current)) {
+        // 移除并销毁复合容器
+        if (groupContainerRef.current) {
+          groupContainerRef.current.removeChildren().forEach((c: any) => {
+            try { c.destroy?.({ children: true, texture: true, baseTexture: true }); } catch {}
+          });
+          app.stage.removeChild(groupContainerRef.current);
+          try { groupContainerRef.current.destroy?.({ children: true }); } catch {}
+        }
+      } else if (modelRef.current) {
+        app.stage.removeChild(modelRef.current as any);
+        try { (modelRef.current as any).destroy?.({ children: true, texture: true, baseTexture: true }); } catch {}
+      }
+    } catch {}
+    groupContainerRef.current = null;
+    modelRef.current = null;
+    isCompositeRef.current = false;
+    motionBaseRef.current = null;
+  };
 
   useEffect(() => {
     (async () => {
@@ -116,7 +168,6 @@ export default function Live2DView() {
     try {
       const newModelList = await invoke<string[]>("refresh_model_index");
       setModelList(newModelList);
-      // 如果当前选中的模型不在新列表中，重置选择
       if (selectedModel && !newModelList.includes(selectedModel)) {
         setSelectedModel(newModelList[0] ?? null);
       }
@@ -155,7 +206,7 @@ export default function Live2DView() {
 
       // 如果已有选择，载入模型
       if (modelUrl) {
-        await loadModel(app, modelUrl);
+        await loadAnyModel(app, modelUrl);
         if (disposed) return;
       }
 
@@ -166,8 +217,12 @@ export default function Live2DView() {
       }
 
       resizeHandler = () => {
-        const m = modelRef.current;
-        if (m) m.position.set(app.screen.width / 2, app.screen.height / 2);
+        if (!appRef.current) return;
+        if (isCompositeRef.current && groupContainerRef.current) {
+          groupContainerRef.current.position.set(appRef.current.screen.width / 2, appRef.current.screen.height / 2);
+        } else if (modelRef.current && !Array.isArray(modelRef.current)) {
+          (modelRef.current as any).position.set(appRef.current.screen.width / 2, appRef.current.screen.height / 2);
+        }
       };
       window.addEventListener("resize", resizeHandler);
     };
@@ -179,7 +234,6 @@ export default function Live2DView() {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       if (resizeHandler) window.removeEventListener("resize", resizeHandler);
       if (canvasRef.current) { canvasRef.current.width = 0; canvasRef.current.height = 0; }
-      // 清理 PIXI
       if (appRef.current) {
         try {
           appRef.current.destroy(true, { children: true, texture: true, baseTexture: true });
@@ -187,6 +241,7 @@ export default function Live2DView() {
         appRef.current = null;
       }
       modelRef.current = null;
+      groupContainerRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // 只初始化一次
@@ -216,26 +271,22 @@ export default function Live2DView() {
       stopPlayback();
       clearTimeline();
 
-      // 移除旧模型
-      if (modelRef.current) {
-        try {
-          appRef.current.stage.removeChild(modelRef.current);
-          (modelRef.current as any).destroy({ children: true, texture: true, baseTexture: true });
-        } catch {}
-        modelRef.current = null;
-      }
+      // 移除旧模型/容器
+      cleanupCurrentModel();
 
-      await loadModel(appRef.current, modelUrl);
+      await loadAnyModel(appRef.current, modelUrl);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modelUrl]);
 
-  // 解析 .mtn：预取真实时长（依赖当前模型数据 & 模型 URL）
+  // 解析 .mtn：预取真实时长（依赖当前模型数据 & 模型 URL 或自定义基准）
   useEffect(() => {
-    if (!modelData || !modelUrl) return;
+    if (!modelData || (!modelUrl && !motionBaseRef.current)) return;
     let aborted = false;
 
-    const base = modelUrl.slice(0, modelUrl.lastIndexOf("/") + 1);
+    const baseFromUrl = (u: string) => u.slice(0, u.lastIndexOf("/") + 1);
+    const base = motionBaseRef.current ?? (modelUrl ? baseFromUrl(modelUrl) : "");
+
     const resolveUrl = (rel: string) => {
       if (/^https?:\/\//i.test(rel)) return rel;
       if (rel.startsWith("/")) return rel;
@@ -265,18 +316,16 @@ export default function Live2DView() {
     return () => { aborted = true; };
   }, [modelData, modelUrl]);
 
-  // ——— 播放 —— //
+  // ——— 播放（广播到所有子模型） —— //
   const playMotion = (group: string) => {
-    const m = modelRef.current;
-    if (!m || !modelData?.motions[group]) return;
-    m.motion(group, 0, 3);
+    if (!modelData?.motions[group]) return;
+    forEachModel((m) => m.motion(group, 0, 3));
     setCurrentMotion(group);
   };
 
   const applyExpression = (name: string) => {
-    const m = modelRef.current;
-    if (!m || !modelData?.expressions?.length) return;
-    m.expression(name);
+    if (!modelData?.expressions?.length) return;
+    forEachModel((m) => m.expression(name));
     setCurrentExpression(name);
   };
 
@@ -354,12 +403,25 @@ export default function Live2DView() {
       return;
     }
 
-    recRef.current = createVp9AlphaRecorder(canvasRef.current, 60, 16000, {
-      onProgress: (time) => {
-        setRecordingTime(time);
-        setRecordingProgress((time / totalDuration) * 100);
-      }
-    });
+    // 根据设置选择录制器类型
+    if (useModelFrame) {
+      // 使用模型边框录制器（裁剪）
+      recRef.current = createModelFrameRecorder(canvasRef.current, modelBounds, 60, 16000, {
+        onProgress: (time: number) => {
+          setRecordingTime(time);
+          setRecordingProgress((time / totalDuration) * 100);
+        },
+        showFrame: showFrameBorder
+      });
+    } else {
+      // 使用全屏录制器
+      recRef.current = createVp9AlphaRecorder(canvasRef.current, 60, 16000, {
+        onProgress: (time: number) => {
+          setRecordingTime(time);
+          setRecordingProgress((time / totalDuration) * 100);
+        }
+      });
+    }
 
     recRef.current.start();
     setRecState("rec");
@@ -397,8 +459,8 @@ export default function Live2DView() {
     await invoke("vp9_to_prores4444", { inWebm: abs, outMov: out });
   };
 
-  // —— 使模型可拖动 —— //
-  const makeDraggable = (model: any) => {
+  // —— 使模型/容器可拖动 —— //
+  const makeDraggableModel = (model: any) => {
     model.interactive = true;
     model.buttonMode = true;
 
@@ -413,6 +475,17 @@ export default function Live2DView() {
       if ((model as any).dragging) {
         model.position.x = e.data.global.x - (model as any)._pointerX;
         model.position.y = e.data.global.y - (model as any)._pointerY;
+        // 更新单模型包围盒
+        const mw = model.width * model.scale.x;
+        const mh = model.height * model.scale.y;
+        const mx = model.position.x - mw / 2;
+        const my = model.position.y - mh / 2;
+        setModelBounds({
+          x: Math.max(0, mx),
+          y: Math.max(0, my),
+          width: Math.min(mw, appRef.current!.screen.width),
+          height: Math.min(mh, appRef.current!.screen.height),
+        });
       }
     });
 
@@ -421,11 +494,75 @@ export default function Live2DView() {
     model.on("pointerupoutside", up);
   };
 
-  // 实际加载模型
-  const loadModel = async (app: PIXI.Application, url: string) => {
+  const makeDraggableContainer = (container: PIXI.Container) => {
+    // 为容器添加一个几乎透明的命中区域，保证好拖
+    const hit = new PIXI.Graphics();
+    const redrawHit = () => {
+      const b = container.getBounds();
+      hit.clear();
+      hit.beginFill(0x000000, 0.0001);
+      hit.drawRect(b.x - container.x, b.y - container.y, b.width, b.height);
+      hit.endFill();
+    };
+    redrawHit();
+    container.addChild(hit);
+
+    container.interactive = true;
+    // @ts-ignore: pixi v7 可用 eventMode
+    container.eventMode = "static";
+    container.cursor = "grab";
+
+    container.on("pointerdown", (e: any) => {
+      setIsDragging(true);
+      // @ts-ignore
+      container.cursor = "grabbing";
+      (container as any).dragging = true;
+      (container as any)._pointerX = e.data.global.x - container.x;
+      (container as any)._pointerY = e.data.global.y - container.y;
+    });
+
+    container.on("pointermove", (e: any) => {
+      if ((container as any).dragging) {
+        container.position.x = e.data.global.x - (container as any)._pointerX;
+        container.position.y = e.data.global.y - (container as any)._pointerY;
+        const b = container.getBounds();
+        setModelBounds({
+          x: Math.max(0, b.x),
+          y: Math.max(0, b.y),
+          width: Math.min(b.width, appRef.current!.screen.width),
+          height: Math.min(b.height, appRef.current!.screen.height),
+        });
+        redrawHit();
+      }
+    });
+
+    const up = () => {
+      setIsDragging(false);
+      // @ts-ignore
+      container.cursor = "grab";
+      (container as any).dragging = false;
+    };
+    container.on("pointerup", up);
+    container.on("pointerupoutside", up);
+    window.addEventListener("resize", redrawHit);
+  };
+
+  // 实际加载：根据后缀分流
+  const loadAnyModel = async (app: PIXI.Application, url: string) => {
+    if (isJsonl(url)) {
+      await loadJsonlComposite(app, url);
+    } else {
+      await loadSingleModel(app, url);
+    }
+  };
+
+  // 单模型
+  const loadSingleModel = async (app: PIXI.Application, url: string) => {
     try {
       const model = await Live2DModel.from(url);
       modelRef.current = model;
+      isCompositeRef.current = false;
+      motionBaseRef.current = url.slice(0, url.lastIndexOf("/") + 1);
 
       // 读取 json
       const res = await fetch(url, { cache: "no-cache" });
@@ -442,13 +579,200 @@ export default function Live2DView() {
         ["angleXParamIndex", "angleYParamIndex", "angleZParamIndex"].forEach((k) => {
           if (typeof im[k] === "number") im[k] = -1;
         });
+        // 关闭眨眼
+        if (im?.eyeBlink) {
+          im.eyeBlink.blinkInterval = 1000 * 60 * 60 * 24;
+          im.eyeBlink.nextBlinkTimeLeft = 1000 * 60 * 60 * 24;
+        }
       }
 
       app.stage.addChild(model);
-      if (enableDragging) makeDraggable(model);
+      if (enableDragging) makeDraggableModel(model);
+      
+      // 计算模型边框用于录制优化
+      const modelWidth = model.width * model.scale.x;
+      const modelHeight = model.height * model.scale.y;
+      const modelX = model.position.x - modelWidth / 2;
+      const modelY = model.position.y - modelHeight / 2;
+      
+      setModelBounds({
+        x: Math.max(0, modelX),
+        y: Math.max(0, modelY),
+        width: Math.min(modelWidth, app.screen.width),
+        height: Math.min(modelHeight, app.screen.height)
+      });
+      
+      console.log("📐 模型边框计算:", { modelWidth, modelHeight, modelX, modelY });
     } catch (err) {
       console.error("❌ 模型加载失败:", err);
       setModelData(null);
+    }
+  };
+
+  // 复合（.jsonl）
+  type JsonlPart = {
+    path: string;
+    id?: string;
+    x?: number;
+    y?: number;
+    xscale?: number;
+    yscale?: number;
+  };
+
+  const loadJsonlComposite = async (app: PIXI.Application, jsonlUrl: string) => {
+    try {
+      const text = await (await fetch(jsonlUrl, { cache: "no-cache" })).text();
+      const lines = text.split("\n").filter(Boolean);
+
+      const parts: JsonlPart[] = [];
+      let summary: { motions?: string[]; expressions?: string[]; import?: number } = {};
+
+      for (const line of lines) {
+        try {
+          const obj = JSON.parse(line);
+          // 汇总行（最后一行）：含 motions 或 expressions
+          if (obj?.motions || obj?.expressions) {
+            if (Array.isArray(obj.motions)) summary.motions = obj.motions;
+            if (Array.isArray(obj.expressions)) summary.expressions = obj.expressions;
+            if (obj.import !== undefined) summary.import = Number(obj.import);
+            continue;
+          }
+          if (obj?.path) {
+            const fullPath = obj.path.startsWith("game/")
+              ? obj.path
+              : resolveRelativeFrom(jsonlUrl, obj.path.replace(/^\.\//, ""));
+            parts.push({
+              path: fullPath,
+              id: obj.id,
+              x: obj.x,
+              y: obj.y,
+              xscale: obj.xscale,
+              yscale: obj.yscale,
+            });
+          }
+        } catch {
+          console.warn("JSONL parse error in line:", line);
+        }
+      }
+
+      if (!parts.length) {
+        console.warn("No valid parts in jsonl:", jsonlUrl);
+        setModelData(null);
+        return;
+      }
+
+      // 用第一只子模型的目录作为 MTN/表达文件的相对解析基准
+      motionBaseRef.current = parts[0].path.slice(0, parts[0].path.lastIndexOf("/") + 1);
+
+      // 创建容器
+      const group = new PIXI.Container();
+      group.sortableChildren = true;
+      group.position.set(app.screen.width / 2, app.screen.height / 2);
+      groupContainerRef.current = group;
+      app.stage.addChild(group);
+
+      // 加载子模型
+      const children: Live2DModel[] = [];
+      for (const p of parts) {
+        try {
+          const m = await Live2DModel.from(p.path, { autoInteract: false });
+          m.visible = false;
+          m.anchor.set(0.5);
+
+          // 基准缩放（尽量完整显示）
+          const baseScaleX = app.screen.width / m.width;
+          const baseScaleY = app.screen.height / m.height;
+          const base = Math.min(baseScaleX, baseScaleY);
+          const sx = base * (p.xscale ?? 1);
+          const sy = base * (p.yscale ?? 1);
+          m.scale.set(sx, sy);
+
+          // 相对容器中心的位移
+          m.position.set(p.x ?? 0, p.y ?? 0);
+
+          const im: any = (m as any).internalModel;
+          if (im) {
+            if (typeof im.angleXParamIndex === "number") im.angleXParamIndex = 999;
+            if (typeof im.angleYParamIndex === "number") im.angleYParamIndex = 999;
+            if (typeof im.angleZParamIndex === "number") im.angleZParamIndex = 999;
+            if (im?.eyeBlink) {
+              im.eyeBlink.blinkInterval = 1000 * 60 * 60 * 24;
+              im.eyeBlink.nextBlinkTimeLeft = 1000 * 60 * 60 * 24;
+            }
+            if (summary.import != null) {
+              try { im.coreModel?.setParamFloat?.("PARAM_IMPORT", Number(summary.import)); } catch {}
+            }
+          }
+
+          group.addChild(m);
+          children.push(m);
+        } catch (e) {
+          console.warn("子模型加载失败:", p.path, e);
+        }
+      }
+
+      // 统一显示
+      children.forEach((m) => (m.visible = true));
+
+      // 拖拽容器
+      if (enableDragging) makeDraggableContainer(group);
+
+      // 计算联合包围盒（用于裁剪录制）
+      requestAnimationFrame(() => {
+        const b = group.getBounds();
+        setModelBounds({
+          x: Math.max(0, b.x),
+          y: Math.max(0, b.y),
+          width: Math.min(b.width, app.screen.width),
+          height: Math.min(b.height, app.screen.height),
+        });
+        console.log("📦 JSONL 复合包围盒:", b);
+      });
+
+      // 合成 modelData：从第一只子模型的 model.json 过滤
+      let synth: ModelData | null = null;
+      try {
+        const firstModelJson = await (await fetch(parts[0].path, { cache: "no-cache" })).json();
+        const fullMotions = firstModelJson?.motions ?? {};
+        const motionGroups = summary.motions?.length ? summary.motions : Object.keys(fullMotions);
+
+        const motionsFiltered: Record<string, Motion[]> = {};
+        for (const g of motionGroups) {
+          const arr = fullMotions[g] || [];
+          motionsFiltered[g] = arr.map((it: any, i: number) => ({
+            name: it?.name ?? `${g}-${i}`,
+            file: it?.file,
+          }));
+        }
+
+        const fullExpr = firstModelJson?.expressions ?? [];
+        const expressions: Expression[] = summary.expressions?.length
+          ? fullExpr.filter((e: any) => summary.expressions!.includes(e?.name)).map((e: any) => ({ name: e?.name, file: e?.file }))
+          : fullExpr.map((e: any) => ({ name: e?.name, file: e?.file }));
+
+        synth = { motions: motionsFiltered, expressions };
+      } catch (e) {
+        console.warn("综合 modelData 失败：", e);
+        synth = { motions: {}, expressions: [] };
+      }
+
+      setModelData(synth);
+      modelRef.current = children;     // 存为数组
+      isCompositeRef.current = true;
+    } catch (err) {
+      console.error("loadJsonlComposite error:", err);
+      setModelData(null);
+      // 清理容器
+      if (groupContainerRef.current && appRef.current) {
+        try {
+          appRef.current.stage.removeChild(groupContainerRef.current);
+          groupContainerRef.current.destroy({ children: true });
+        } catch {}
+      }
+      groupContainerRef.current = null;
+      modelRef.current = null;
+      isCompositeRef.current = false;
+      motionBaseRef.current = null;
     }
   };
 
@@ -465,7 +789,7 @@ export default function Live2DView() {
         <ControlPanel
           onClose={() => setShowControls(false)}
 
-          // 新增：模型选择（ControlPanel 需增加这3个 props）
+          // 模型选择
           modelList={modelList}
           selectedModel={selectedModel}
           onSelectModel={(rel) => setSelectedModel(rel || null)}
@@ -497,6 +821,14 @@ export default function Live2DView() {
           clearTimeline={clearTimeline}
           onChangeClip={changeClip}
           onSetPlayhead={setPlayheadSec}
+          
+          // 录制控制选项
+          useModelFrame={useModelFrame}
+          setUseModelFrame={setUseModelFrame}
+          showFrameBorder={showFrameBorder}
+          setShowFrameBorder={setShowFrameBorder}
+          modelBounds={modelBounds}
+          setModelBounds={setModelBounds}
         />
       )}
 
@@ -541,7 +873,7 @@ export default function Live2DView() {
             onChange={(e) => setTransparentBg(e.target.checked)}
             style={{ width: 16, height: 16 }}
           />
-          <label htmlFor="transparentBg" style={{ fontSize: "12px" }}>
+        <label htmlFor="transparentBg" style={{ fontSize: "12px" }}>
             透明背景
           </label>
         </div>
@@ -638,4 +970,3 @@ export default function Live2DView() {
     </div>
   );
 }
-
