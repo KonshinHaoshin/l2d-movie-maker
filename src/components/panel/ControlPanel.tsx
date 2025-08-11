@@ -1,3 +1,4 @@
+// src/components/panel/ControlPanel.tsx
 import React, { useMemo, useState, useEffect } from "react";
 import type { Clip, TrackKind } from "../timeline/types";
 
@@ -11,10 +12,11 @@ export interface ModelData {
 type Props = {
   onClose: () => void;
 
-  // 新增：模型清单
+  // 模型清单（来自 /model/models.json）
   modelList: string[];
   selectedModel: string | null;
-  onSelectModel: (relPath: string) => void;
+  onSelectModel: (relPath: string | null) => void;
+  onRefreshModels?: () => void;
 
   // 数据
   modelData: ModelData | null;
@@ -30,7 +32,7 @@ type Props = {
   setMotionDur: (n: number) => void;
   setExprDur: (n: number) => void;
 
-  // 行为（父组件实现）
+  // 行为（由父组件实现）
   chooseMotion: (name: string) => void;
   chooseExpression: (name: string) => void;
   addMotionClip: (name: string) => void;
@@ -61,9 +63,7 @@ type Props = {
 const ControlPanel: React.FC<Props> = (props) => {
   const {
     onClose,
-    // 新增
-    modelList, selectedModel, onSelectModel,
-
+    modelList, selectedModel, onSelectModel, onRefreshModels,
     modelData, motionLen,
     currentMotion, currentExpression,
     motionDur, exprDur, setMotionDur, setExprDur,
@@ -80,7 +80,7 @@ const ControlPanel: React.FC<Props> = (props) => {
   useEffect(() => { setMotionPage(1); }, [motionQuery, motionPageSize, modelData]);
 
   const allMotionNames = useMemo(
-    () => (modelData ? Object.keys(modelData.motions) : []),
+    () => (modelData ? Object.keys(modelData.motions || {}) : []),
     [modelData]
   );
   const filteredMotions = useMemo(
@@ -101,7 +101,7 @@ const ControlPanel: React.FC<Props> = (props) => {
   useEffect(() => { setExprPage(1); }, [exprQuery, exprPageSize, modelData]);
 
   const allExprNames = useMemo(
-    () => (modelData ? modelData.expressions.map(e => e.name) : []),
+    () => (modelData ? (modelData.expressions || []).map(e => e.name) : []),
     [modelData]
   );
   const filteredExprs = useMemo(
@@ -122,17 +122,17 @@ const ControlPanel: React.FC<Props> = (props) => {
         <button className="l2d-close" onClick={onClose}>✕</button>
       </div>
 
-      {/* 新增：模型选择（从 /dist/model/models.json 生成的列表） */}
+      {/* 模型选择 */}
       <div className="l2d-section">
         <h4 className="l2d-section-title">🧩 模型选择</h4>
         <div className="row" style={{ gap: 8 }}>
           <select
             className="input"
             value={selectedModel ?? ""}
-            onChange={(e) => onSelectModel(e.target.value)}
+            onChange={(e) => onSelectModel(e.target.value || null)}
             style={{ width: "100%" }}
           >
-            {modelList.length === 0 && <option value="">（未发现模型，先构建生成 models.json）</option>}
+            {modelList.length === 0 && <option value="">（未发现模型，请确认 exe 同级的 model/ 目录存在）</option>}
             {modelList.map((rel) => (
               <option key={rel} value={rel}>
                 {rel}
@@ -142,6 +142,22 @@ const ControlPanel: React.FC<Props> = (props) => {
           <span className="muted" style={{ whiteSpace: "nowrap" }}>
             共 {modelList.length} 项
           </span>
+        </div>
+        <div className="row" style={{ gap: 8, marginTop: 6 }}>
+          {onRefreshModels && (
+            <button 
+              className="btn" 
+              onClick={onRefreshModels}
+              style={{ fontSize: 12 }}
+            >
+              🔄 刷新模型列表
+            </button>
+          )}
+          {selectedModel && (
+            <div className="muted" style={{ fontSize: 12 }}>
+              选中：{selectedModel}
+            </div>
+          )}
         </div>
       </div>
 
@@ -202,6 +218,8 @@ const ControlPanel: React.FC<Props> = (props) => {
             className="input"
             type="number"
             value={motionDur}
+            step={0.1}
+            min={0.1}
             onChange={(e) => setMotionDur(Math.max(0.1, Number(e.target.value) || 0.1))}
           />
           <button className="btn" onClick={() => currentMotion && addMotionClip(currentMotion)}>
@@ -214,7 +232,6 @@ const ControlPanel: React.FC<Props> = (props) => {
       <div className="l2d-section">
         <h4 className="l2d-section-title">😊 表情</h4>
 
-        {/* 搜索 + 分页控制 */}
         <div className="row" style={{ gap: 8 }}>
           <input
             className="input"
@@ -264,6 +281,8 @@ const ControlPanel: React.FC<Props> = (props) => {
             className="input"
             type="number"
             value={exprDur}
+            step={0.1}
+            min={0.1}
             onChange={(e) => setExprDur(Math.max(0.1, Number(e.target.value) || 0.1))}
           />
           <button className="btn" onClick={() => currentExpression && addExprClip(currentExpression)}>
@@ -290,7 +309,7 @@ const ControlPanel: React.FC<Props> = (props) => {
       <div className="l2d-section muted" style={{ fontSize: 12 }}>
         总时长：{timelineLength.toFixed(2)}s<br />
         播放头：{playhead.toFixed(2)}s
-        <div className="row">
+        <div className="row" style={{ marginTop: 6, gap: 6 }}>
           <button
             className="btn btn--primary"
             onClick={startPlayback}
@@ -309,7 +328,7 @@ const ControlPanel: React.FC<Props> = (props) => {
         </div>
       </div>
 
-      {/* 录制设置（占位，不动） */}
+      {/* 录制设置（占位，不动 UI） */}
       <div className="l2d-section">
         <h4 className="l2d-section-title">🎥 录制设置</h4>
         <div className="row" style={{ gap: 8, marginTop: 8 }}>

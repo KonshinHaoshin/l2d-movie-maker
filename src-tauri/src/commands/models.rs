@@ -91,6 +91,15 @@ fn filter_model_like(files: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
     let mut out = Vec::new();
 
     'each: for file in files {
+        // 添加文件大小检查，防止读取过大的文件
+        let metadata = fs::metadata(file)
+            .map_err(|e| format!("获取文件元数据失败 '{}': {}", file.display(), e))?;
+        
+        // 限制文件大小为 10MB，防止内存溢出
+        if metadata.len() > 10 * 1024 * 1024 {
+            continue;
+        }
+
         let is_jsonl = file.extension().map(|e| e == "jsonl").unwrap_or(false);
         let text = fs::read_to_string(file)
             .map_err(|e| format!("读取 '{}' 失败: {}", file.display(), e))?;

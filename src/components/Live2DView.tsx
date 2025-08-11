@@ -27,10 +27,13 @@ export default function Live2DView() {
   const modelRef = useRef<Live2DModel | null>(null);
   const appRef = useRef<PIXI.Application | null>(null);
 
+  // 获取模型服务器信息
+  const [assetBase, setAssetBase] = useState<string | null>(null);
+
   // —— 模型选择 —— //
   const [modelList, setModelList] = useState<string[]>([]);
-  const [selectedModel, setSelectedModel] = useState<string | null>(null); // e.g. "anon/model.json"
-  const modelUrl = selectedModel ? `/model/${selectedModel}` : null;      // 最终 URL
+  const [selectedModel, setSelectedModel] = useState<string | null>(null); // 例如 "anon/model.json"
+  const modelUrl = selectedModel && assetBase ? `${assetBase}/${selectedModel}` : null; // 最终 URL
 
   // —— 当前模型数据 —— //
   const [modelData, setModelData] = useState<ModelData | null>(null);
@@ -74,25 +77,55 @@ export default function Live2DView() {
   const [transparentBg, setTransparentBg] = useState(true);
   const [blob, setBlob] = useState<Blob | null>(null);
 
-  // 读取 dist/model/models.json
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch("/model/models.json", { cache: "no-cache" });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const arr = (await res.json()) as string[];
-        setModelList(arr);
-        // 默认选择第一项（或保持已选）
-        setSelectedModel((prev) => prev ?? arr[0] ?? null);
+        // 调 Rust，拿到 http://127.0.0.1:PORT/model
+        const { base_url } = await invoke<{base_url: string, models_dir: string}>("get_model_server_info");
+        setAssetBase(base_url);
       } catch (e) {
-        console.warn("未能读取 /model/models.json。请先构建并生成该文件。", e);
-        setModelList([]);
-        setSelectedModel(null);
+        console.error("获取模型服务器信息失败:", e);
+        setAssetBase(null);
       }
     })();
   }, []);
 
-  // 初始化 PIXI
+  // 读取模型列表
+  const loadModelList = async () => {
+    if (!assetBase) return;
+    try {
+      const res = await fetch(`${assetBase}/models.json`, { cache: "no-cache" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const arr = (await res.json()) as string[];
+      setModelList(arr);
+      // 默认选择第一项（或保持已选）
+      setSelectedModel(prev => prev ?? arr[0] ?? null);
+    } catch (e) {
+      console.warn("读取外部 models.json 失败，请确认 exe 同级的 model/models.json 存在", e);
+      setModelList([]);
+      setSelectedModel(null);
+    }
+  };
+
+  useEffect(() => {
+    loadModelList();
+  }, [assetBase]);
+
+  // 刷新模型列表
+  const refreshModels = async () => {
+    try {
+      const newModelList = await invoke<string[]>("refresh_model_index");
+      setModelList(newModelList);
+      // 如果当前选中的模型不在新列表中，重置选择
+      if (selectedModel && !newModelList.includes(selectedModel)) {
+        setSelectedModel(newModelList[0] ?? null);
+      }
+    } catch (e) {
+      console.error("刷新模型列表失败:", e);
+    }
+  };
+
+  // 初始化 PIXI（仅一次）
   useEffect(() => {
     let disposed = false;
     let resizeHandler: (() => void) | null = null;
@@ -211,7 +244,7 @@ export default function Live2DView() {
     };
 
     (async () => {
-      const entries = Object.entries(modelData.motions);
+      const entries = Object.entries(modelData.motions || {});
       const results = await Promise.all(
         entries.map(async ([group, arr]) => {
           const first = arr?.[0]?.file;
@@ -371,19 +404,19 @@ export default function Live2DView() {
 
     model.on("pointerdown", (e: any) => {
       setIsDragging(true);
-      model.dragging = true;
-      model._pointerX = e.data.global.x - model.x;
-      model._pointerY = e.data.global.y - model.y;
+      (model as any).dragging = true;
+      (model as any)._pointerX = e.data.global.x - model.x;
+      (model as any)._pointerY = e.data.global.y - model.y;
     });
 
     model.on("pointermove", (e: any) => {
-      if (model.dragging) {
-        model.position.x = e.data.global.x - model._pointerX;
-        model.position.y = e.data.global.y - model._pointerY;
+      if ((model as any).dragging) {
+        model.position.x = e.data.global.x - (model as any)._pointerX;
+        model.position.y = e.data.global.y - (model as any)._pointerY;
       }
     });
 
-    const up = () => { setIsDragging(false); model.dragging = false; };
+    const up = () => { setIsDragging(false); (model as any).dragging = false; };
     model.on("pointerup", up);
     model.on("pointerupoutside", up);
   };
@@ -432,10 +465,11 @@ export default function Live2DView() {
         <ControlPanel
           onClose={() => setShowControls(false)}
 
-          // 新增：模型选择
+          // 新增：模型选择（ControlPanel 需增加这3个 props）
           modelList={modelList}
           selectedModel={selectedModel}
           onSelectModel={(rel) => setSelectedModel(rel || null)}
+          onRefreshModels={refreshModels}
 
           modelData={modelData}
           motionLen={motionLen}
@@ -604,3 +638,4 @@ export default function Live2DView() {
     </div>
   );
 }
+
