@@ -1,6 +1,7 @@
 // src-tauri/src/commands/models.rs
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::collections::HashSet;
 
 use glob::glob;
 use serde::Serialize;
@@ -56,10 +57,27 @@ pub fn find_live2d_models(root: String) -> Result<Vec<ModelEntry>, String> {
 }
 
 /// 收集 .json / .jsonl（忽略 *.exp.json），递归遍历
+/// 规则：如果发现某目录存在 .jsonl，则忽略该目录及其子目录中的所有 .json 文件
 fn get_json_and_jsonl(dir: &Path) -> Result<Vec<PathBuf>, String> {
     let pat = format!("{}/**/*", dir.display());
-    let mut out = Vec::new();
 
+    // 第一遍：记录所有包含 .jsonl 的“根目录”（jsonl 的父目录）
+    let mut skip_dirs: HashSet<PathBuf> = HashSet::new();
+    for entry in glob(&pat).map_err(|e| format!("glob 失败: {e}"))? {
+        let path = entry.map_err(|e| format!("遍历失败: {e}"))?;
+        if path.is_dir() {
+            continue;
+        }
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+        if ext == "jsonl" {
+            if let Some(parent) = path.parent() {
+                skip_dirs.insert(parent.to_path_buf());
+            }
+        }
+    }
+
+    // 第二遍：产出文件列表
+    let mut out = Vec::new();
     for entry in glob(&pat).map_err(|e| format!("glob 失败: {e}"))? {
         let path = entry.map_err(|e| format!("遍历失败: {e}"))?;
         if path.is_dir() {
@@ -76,6 +94,24 @@ fn get_json_and_jsonl(dir: &Path) -> Result<Vec<PathBuf>, String> {
             continue;
         }
 
+        if ext == "jsonl" {
+            // jsonl 一律保留
+            out.push(path);
+            continue;
+        }
+
+        // 到这里是 .json：如该文件位于任一“含 jsonl 的目录”或其子目录，则跳过
+        let mut skip = false;
+        for root in &skip_dirs {
+            if path.starts_with(root) {
+                skip = true;
+                break;
+            }
+        }
+        if skip {
+            continue;
+        }
+
         out.push(path);
     }
 
@@ -87,10 +123,11 @@ fn get_json_and_jsonl(dir: &Path) -> Result<Vec<PathBuf>, String> {
 ///     - Cubism2：含 "model" 且 "textures"（非空数组）
 ///     - Cubism3/4：FileReferences.Moc 存在 且 FileReferences.Textures 为非空数组
 ///     （⚠️ 不强制文件名叫 model.json）
-/// - .jsonl（聚合清单）：任意一行满足以下任一条件：
+/// - .jsonl：任意一行满足以下任一条件：
 ///     - 含 "motions" 或 "expressions"（拼好模汇总行）
 ///     - 含 "path" 为字符串，且以 ".json" 或 ".model3.json" 结尾（子模型行）
 ///     - 含 "model" 字段（兼容少数工具产出的格式）
+///     - 行本身就是一个标准 Live2D json（调用 is_live2d_json 判断）
 /// 仅用于生成清单，具体加载逻辑由前端决定。
 fn filter_model_like(files: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
     let mut out = Vec::new();
@@ -108,14 +145,14 @@ fn filter_model_like(files: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
             .map_err(|e| format!("读取 '{}' 失败: {}", file.display(), e))?;
 
         if ext_jsonl {
-            // 逐行判定
+            // 逐行判定（jsonl 也可能只有一行就是普通 json）
             for line in text.lines() {
                 let l = line.trim();
                 if l.is_empty() {
                     continue;
                 }
                 if let Ok(v) = serde_json::from_str::<Value>(l) {
-                    if is_jsonl_line_model_like(&v) {
+                    if is_jsonl_line_model_like(&v) || is_live2d_json(&v) {
                         out.push(file.clone());
                         continue 'each;
                     }

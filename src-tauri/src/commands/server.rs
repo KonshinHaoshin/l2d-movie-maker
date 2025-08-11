@@ -106,7 +106,7 @@ fn scan_models_dir(models_dir: &PathBuf) -> Result<Vec<ModelEntry>, String> {
     let mut models = Vec::new();
     
     // 递归扫描所有子目录
-    scan_directory_recursive(models_dir, models_dir, &mut models)?;
+    scan_directory_recursive(models_dir, models_dir, &mut models, false)?;
     
     // 按名称排序
     models.sort_by(|a, b| a.label.to_lowercase().cmp(&b.label.to_lowercase()));
@@ -115,88 +115,69 @@ fn scan_models_dir(models_dir: &PathBuf) -> Result<Vec<ModelEntry>, String> {
 
 /// 递归扫描目录，查找Live2D模型文件和.jsonl文件
 fn scan_directory_recursive(
-    current_dir: &Path, 
-    base_dir: &Path, 
-    models: &mut Vec<ModelEntry>
+    current_dir: &Path,
+    base_dir: &Path,
+    models: &mut Vec<ModelEntry>,
+    mut skip_json_in_tree: bool,   // 新增：是否在这棵子树内忽略 .json
 ) -> Result<(), String> {
-    for entry in fs::read_dir(current_dir).map_err(|e| format!("读取目录失败: {}", e))? {
-        let entry = entry.map_err(|e| format!("遍历目录失败: {}", e))?;
-        let path = entry.path();
-        
-        if path.is_dir() {
-            // 递归扫描子目录
-            scan_directory_recursive(&path, base_dir, models)?;
-        } else if path.is_file() {
-            // 检查文件扩展名
-            if let Some(extension) = path.extension() {
-                let ext = extension.to_string_lossy().to_lowercase();
-                
-                match ext.as_str() {
-                    "json" => {
-                        // 检查是否为Live2D模型文件
-                        if is_live2d_model_file(&path)? {
-                            let relative_path = path.strip_prefix(base_dir)
-                                .map_err(|e| format!("路径处理失败: {}", e))?
-                                .to_string_lossy()
-                                .replace('\\', "/");
-                            
-                            let label = path.file_name()
-                                .and_then(|s| s.to_str())
-                                .unwrap_or("unknown")
-                                .to_string();
-                            
-                            models.push(ModelEntry {
-                                label: format!("{} ({})", label, relative_path),
-                                path: relative_path,
-                            });
-                        }
-                    },
-                    "jsonl" => {
-                        // 检查是否为有效的.jsonl文件
-                        if is_valid_jsonl_file(&path)? {
-                            let relative_path = path.strip_prefix(base_dir)
-                                .map_err(|e| format!("路径处理失败: {}", e))?
-                                .to_string_lossy()
-                                .replace('\\', "/");
-                            
-                            let label = path.file_name()
-                                .and_then(|s| s.to_str())
-                                .unwrap_or("unknown")
-                                .to_string();
-                            
-                            models.push(ModelEntry {
-                                label: format!("{} (JSONL)", label),
-                                path: relative_path,
-                            });
-                        }
-                    },
-                    "moc" | "moc3" => {
-                        // 检查是否有对应的配置文件
-                        if let Some(config_path) = find_model_config_for_moc(&path)? {
-                            let relative_path = config_path.strip_prefix(base_dir)
-                                .map_err(|e| format!("路径处理失败: {}", e))?
-                                .to_string_lossy()
-                                .replace('\\', "/");
-                            
-                            let label = path.file_name()
-                                .and_then(|s| s.to_str())
-                                .unwrap_or("unknown")
-                                .to_string();
-                            
-                            models.push(ModelEntry {
-                                label: format!("{} (MOC)", label),
-                                path: relative_path,
-                            });
-                        }
-                    },
-                    _ => {}
-                }
+    // 先看当前目录是否有 jsonl，有则标记
+    if !skip_json_in_tree {
+        for e in fs::read_dir(current_dir).map_err(|e| format!("读取目录失败: {}", e))? {
+            let p = e.map_err(|e| format!("遍历目录失败: {}", e))?.path();
+            if p.is_file() && p.extension().and_then(|x| x.to_str()).map(|s| s.eq_ignore_ascii_case("jsonl")).unwrap_or(false) {
+                skip_json_in_tree = true;
+                break;
             }
         }
     }
-    
+
+    for entry in fs::read_dir(current_dir).map_err(|e| format!("读取目录失败: {}", e))? {
+        let entry = entry.map_err(|e| format!("遍历目录失败: {}", e))?;
+        let path = entry.path();
+
+        if path.is_dir() {
+            // 子目录继承 skip_json_in_tree
+            scan_directory_recursive(&path, base_dir, models, skip_json_in_tree)?;
+            continue;
+        }
+
+        if !path.is_file() { continue; }
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+
+        match ext.as_str() {
+            "jsonl" => {
+                if is_valid_jsonl_file(&path)? {
+                    let relative = path.strip_prefix(base_dir).map_err(|e| format!("路径处理失败: {}", e))?
+                        .to_string_lossy().replace('\\', "/");
+                    let label = path.file_name().and_then(|s| s.to_str()).unwrap_or("unknown").to_string();
+                    models.push(ModelEntry { label: format!("{} (JSONL)", label), path: relative });
+                }
+            }
+            "json" => {
+                if skip_json_in_tree { continue; } // 关键：该树已发现 jsonl，就忽略 .json
+
+                if is_live2d_model_file(&path)? {
+                    let relative = path.strip_prefix(base_dir).map_err(|e| format!("路径处理失败: {}", e))?
+                        .to_string_lossy().replace('\\', "/");
+                    let label = path.file_name().and_then(|s| s.to_str()).unwrap_or("unknown").to_string();
+                    models.push(ModelEntry { label: format!("{} ({})", label, relative), path: relative });
+                }
+            }
+            "moc" | "moc3" => {
+                if skip_json_in_tree { continue; } // 同理：避免把它匹配到的 config.json 又加回来
+                if let Some(cfg) = find_model_config_for_moc(&path)? {
+                    let relative = cfg.strip_prefix(base_dir).map_err(|e| format!("路径处理失败: {}", e))?
+                        .to_string_lossy().replace('\\', "/");
+                    let label = path.file_name().and_then(|s| s.to_str()).unwrap_or("unknown").to_string();
+                    models.push(ModelEntry { label: format!("{} (MOC)", label), path: relative });
+                }
+            }
+            _ => {}
+        }
+    }
     Ok(())
 }
+
 
 /// 检查文件是否为Live2D模型文件
 fn is_live2d_model_file(file_path: &Path) -> Result<bool, String> {
