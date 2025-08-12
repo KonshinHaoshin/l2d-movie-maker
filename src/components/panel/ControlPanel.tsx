@@ -316,7 +316,8 @@ const ControlPanel: React.FC<Props> = (props) => {
       {/* 播放控制 */}
       <div className="l2d-section muted" style={{ fontSize: 12 }}>
         总时长：{timelineLength.toFixed(2)}s<br />
-        播放头：{playhead.toFixed(2)}s
+        播放头：{playhead.toFixed(2)}s<br />
+        <span style={{ fontSize: 11, opacity: 0.8 }}>💡 提示：按空格键或双击时间线开始/停止播放</span>
         <div className="row" style={{ marginTop: 6, gap: 6 }}>
           <button
             className="btn btn--primary"

@@ -261,6 +261,28 @@ export default function Live2DView() {
     }
   }, [transparentBg]);
 
+  // 添加空格键控制播放
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // 如果焦点在输入框中，不处理空格键
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+      
+      if (e.code === 'Space') {
+        e.preventDefault(); // 防止页面滚动
+        if (isPlaying) {
+          stopPlayback();
+        } else {
+          startPlayback();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isPlaying]);
+
   // 当选择的模型发生变化时，重新加载
   useEffect(() => {
     (async () => {
@@ -843,6 +865,9 @@ export default function Live2DView() {
           else setExprClips(prev => prev.filter(c => c.id !== id));
         }}
         onSetPlayhead={setPlayheadSec}
+        onStartPlayback={startPlayback}
+        onStopPlayback={stopPlayback}
+        isPlaying={isPlaying}
       />
 
       {/* 导出工具条（右下角） */}

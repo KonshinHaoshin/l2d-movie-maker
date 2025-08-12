@@ -20,6 +20,11 @@ type Props = {
 
     // 播放头
     onSetPlayhead?: (sec: number) => void;
+    
+    // 播放控制
+    onStartPlayback?: () => void;
+    onStopPlayback?: () => void;
+    isPlaying?: boolean;
 };
 
 // —— UI 常量 —— //
@@ -52,6 +57,10 @@ export default function Timeline({
                                      onChangeClip,
                                      onRemoveClip,
                                      onSetPlayhead,
+                                     onStartPlayback,
+                                     // @ts-ignore
+                                     onStopPlayback,
+                                     isPlaying,
                                  }: Props) {
     // 缩放：支持受控/非受控
     const [internalPps, setInternalPps] = useState(pixelsPerSec ?? DEFAULT_PPS);
@@ -145,12 +154,22 @@ export default function Timeline({
         return (
             <div
                 className="tl-ruler"
+                title="双击开始播放"
                 onMouseDown={(e) => {
                     if (!wrapRef.current) return;
                     const x = e.clientX - wrapRef.current.getBoundingClientRect().left;
                     setDrag({ mode: "playhead", mouseX0: x, playhead0: playheadSec });
                     onSetPlayhead?.(snap(Math.max(0, x / pps)));
                 }}
+                onDoubleClick={(e) => {
+                    // 双击时间线标尺开始播放
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (onStartPlayback && !isPlaying) {
+                        onStartPlayback();
+                    }
+                }}
+                style={{ cursor: 'pointer' }}
             >
                 <div className="tl-ruler-inner" style={{ width: totalPx }}>
                     {Array.from({ length: secCount + 1 }).map((_, i) => (
@@ -199,13 +218,14 @@ export default function Timeline({
                                 <div
                                     key={c.id}
                                     className="tl-clip"
-                                    title={`${c.name}  ${c.duration.toFixed(2)}s`}
+                                    title={`${c.name}  ${c.duration.toFixed(2)}s (双击播放)`}
                                     style={{
                                         left,
                                         width,
                                         height: CLIP_H,
                                         top: (TRACK_H - CLIP_H) / 2,
                                         background: color,
+                                        cursor: 'pointer',
                                     }}
                                     onMouseDown={(e) => {
                                         // 排除点到把手
@@ -214,6 +234,14 @@ export default function Timeline({
                                         if (!wrapRef.current) return;
                                         const x = e.clientX - wrapRef.current.getBoundingClientRect().left;
                                         setDrag({ mode: "move", track, id: c.id, start0: c.start, mouseX0: x });
+                                    }}
+                                    onDoubleClick={(e) => {
+                                        // 双击开始播放
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        if (onStartPlayback && !isPlaying) {
+                                            onStartPlayback();
+                                        }
                                     }}
                                 >
                                     {/* 左右裁剪把手 */}

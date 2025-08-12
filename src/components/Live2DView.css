@@ -482,4 +482,11 @@
 .tl-clip:hover {
     background: #505050;
     border-color: #707070;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+}
+
+.tl-ruler:hover {
+    background: #1e1e1e;
+    border-color: #505050;
 }
