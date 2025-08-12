@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build && node scripts/gen-model-index.mjs",    
+    "build": "tsc -b && vite build",    
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build && node scripts/gen-model-index.mjs",
+    "tauri:build": "tauri build",
     "lint": "eslint .",
     "preview": "vite preview"
   },

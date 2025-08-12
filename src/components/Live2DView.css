@@ -347,6 +347,8 @@
     /* 调整容器尺寸以适应缩放 */
     width: 150vw;
     height: 150vh;
+    /* 设置容器背景为灰色 */
+    background: #808080;
 }
 
 .live2d-container canvas {
@@ -361,6 +363,10 @@
     height: auto;
     /* 移除居中transform，使用左上角定位 */
     transform: none;
+    /* 添加边框 */
+    border: 2px solid #404040;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
 /* 时间线定位到底部 */
