@@ -11,6 +11,7 @@ export interface ModelData {
 
 type Props = {
   onClose: () => void;
+  onToggleWebGALMode: () => void;
 
   // 模型清单（来自 /model/models.json）
   modelList: string[];
@@ -67,7 +68,7 @@ type Props = {
 
 const ControlPanel: React.FC<Props> = (props) => {
   const {
-    onClose,
+    onClose, onToggleWebGALMode,
     modelList, selectedModel, onSelectModel, onRefreshModels,
     modelData, motionLen,
     currentMotion, currentExpression,
@@ -158,6 +159,13 @@ const ControlPanel: React.FC<Props> = (props) => {
               🔄 刷新模型列表
             </button>
           )}
+          <button 
+            className="btn" 
+            onClick={onToggleWebGALMode}
+            style={{ fontSize: 12 }}
+          >
+            🎮 WebGAL模式
+          </button>
           {selectedModel && (
             <div className="muted" style={{ fontSize: 12 }}>
               选中：{selectedModel}

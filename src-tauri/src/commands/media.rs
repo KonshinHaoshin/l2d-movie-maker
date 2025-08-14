@@ -1,4 +1,24 @@
 use std::process::Command;
+use std::path::PathBuf;
+
+/// 设置文件系统作用域
+#[tauri::command]
+pub async fn set_fs_scope(path: String, recursive: bool) -> Result<(), String> {
+    // 这里我们只是记录路径，实际的权限控制由 Tauri 的 capabilities 系统处理
+    println!("设置文件系统作用域: {} (递归: {})", path, recursive);
+    
+    // 验证路径是否存在
+    let path_buf = PathBuf::from(&path);
+    if !path_buf.exists() {
+        return Err(format!("路径不存在: {}", path));
+    }
+    
+    if !path_buf.is_dir() {
+        return Err(format!("路径不是目录: {}", path));
+    }
+    
+    Ok(())
+}
 
 /// VP9(WebM + alpha) → MOV(ProRes 4444, 真透明)
 #[tauri::command]

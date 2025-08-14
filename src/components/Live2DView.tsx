@@ -12,6 +12,10 @@ import ExportToolbar from "./ExportToolbar";
 import ModelManager from "./ModelManager";
 import AudioManager from "./AudioManager";
 import RecordingManager from "./RecordingManager";
+import WebGALMode from "./WebGALMode";
+// import { convertFileSrc } from "@tauri-apps/api/core";
+// import { normalizePath } from "../utils/fs";
+import { WebGALParser } from "../utils/webgalParser";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { appCacheDir, BaseDirectory, join } from "@tauri-apps/api/path";
@@ -85,6 +89,9 @@ export default function Live2DView() {
    
   // —— 录制质量设置 —— //
   const [recordingQuality, setRecordingQuality] = useState<"low" | "medium" | "high">("medium");
+  
+  // —— WebGAL模式 —— //
+  const [showWebGALMode, setShowWebGALMode] = useState(false);
 
   // 初始化管理器
   const modelManager = ModelManager({
@@ -313,6 +320,150 @@ export default function Live2DView() {
     if (!out) return;
     await invoke("vp9_to_prores4444", { inWebm: abs, outMov: out });
   };
+
+                // 导入WebGAL时间线
+// Live2DView.tsx 里
+const importWebGALTimeline = async (gameDir: string, commands: any[]) => {
+  try {
+    const parser = new WebGALParser(gameDir); // ✅ 基准目录来自 WebGALMode
+
+    let currentTime = 0;
+
+    for (const command of commands) {
+      if (command.type === 'changeFigure') {
+        const figure = command.data;
+
+        if (figure.path) {
+          try {
+            // 先解析成绝对路径（一定包含盘符）
+            const resolved = await parser.resolveFigurePath(figure.path);
+            console.log('🧭 解析后的模型路径:', resolved);
+
+            // 读取一下看看是否可达（可选）
+            await parser.loadModelFile(resolved); // 使用解析后的绝对路径
+            console.log('✅ 模型文件读取成功:', resolved);
+          } catch (error) {
+            console.error('❌ 模型文件读取失败:', {
+              originalPath: figure.path,
+              error: error instanceof Error ? error.message : String(error),
+              stack: error instanceof Error ? error.stack : undefined
+            });
+            
+            // 尝试获取更多调试信息
+            try {
+              const resolved = await parser.resolveFigurePath(figure.path);
+              console.log('🔍 调试信息 - 解析后的路径:', resolved);
+              
+              // 尝试直接测试文件访问
+              console.log('🧪 测试直接文件访问...');
+              try {
+                const testContent = await parser.loadModelFile(resolved); // 使用解析后的路径
+                console.log('✅ 直接访问成功，文件大小:', testContent.length);
+              } catch (testError) {
+                console.log('❌ 直接访问失败:', testError);
+                
+                // 尝试直接测试文件访问
+                console.log('🧪 尝试直接文件访问...');
+                const directAccess = await parser.testDirectFileAccess(resolved);
+                if (directAccess) {
+                  console.log('✅ 直接访问成功！');
+                } else {
+                  console.log('❌ 直接访问也失败');
+                }
+              }
+            } catch (debugError) {
+              console.log('🔍 调试信息 - 路径解析也失败:', debugError);
+            }
+          }
+        }
+
+        // 同时添加 motion/expression 到时间线
+        if (figure.motion || figure.expression) {
+          const startTime = currentTime;
+          const duration = 2.0;
+
+          if (figure.motion) {
+            setMotionClips(prev => [...prev, {
+              id: crypto.randomUUID(),
+              name: figure.motion,
+              start: startTime,
+              duration
+            }]);
+          }
+
+          if (figure.expression) {
+            setExprClips(prev => [...prev, {
+              id: crypto.randomUUID(),
+              name: figure.expression,
+              start: startTime,
+              duration
+            }]);
+          }
+
+          currentTime += duration;
+        }
+      } else if (command.type === 'dialogue') {
+        const dialogue = command.data;
+
+        // 解析音频绝对路径
+        const audioAbs = await parser.resolveAudioPath(dialogue.audioPath);
+
+        if (audioAbs) {
+          try {
+            const audio = new Audio(audioAbs);
+            await new Promise((resolve) => {
+              audio.onloadedmetadata = resolve;
+              audio.load();
+            });
+
+            const duration = audio.duration || 3.0;
+
+            const audioClip = {
+              id: crypto.randomUUID(),
+              name: `${dialogue.speaker ?? ''}: ${dialogue.text.substring(0, 20)}...`,
+              start: currentTime,
+              duration,
+              audioUrl: audioAbs
+            };
+
+            setAudioClips(prev => [...prev, audioClip]);
+
+            // 音频分析管线
+            audioManager.audioRefs.current.set(audioClip.id, audio);
+            if (audioManager.audioContextRef.current) {
+              try {
+                const source = audioManager.audioContextRef.current.createMediaElementSource(audio);
+                const analyzer = audioManager.audioContextRef.current.createAnalyser();
+                analyzer.fftSize = 256;
+                analyzer.smoothingTimeConstant = 0.8;
+
+                source.connect(analyzer);
+                analyzer.connect(audioManager.audioContextRef.current.destination);
+
+                audioManager.audioAnalyzersRef.current.set(audioClip.id, { source, analyzer });
+              } catch (error) {
+                console.warn('音频分析器设置失败:', error);
+              }
+            }
+
+            currentTime += duration;
+          } catch (error) {
+            console.warn('音频加载失败:', error);
+            currentTime += 3.0;
+          }
+        } else {
+          currentTime += 2.0; // 没有音频，默认时长
+        }
+      }
+    }
+
+    console.log(`✅ 成功导入 ${commands.length} 个 WebGAL 命令，总时长: ${currentTime.toFixed(2)}s`);
+  } catch (error) {
+    console.error('导入WebGAL时间线失败:', error);
+    alert('导入失败: ' + error);
+  }
+};
+
 
   // 重置为模型边框
   const resetToModelBounds = () => {
@@ -562,17 +713,26 @@ export default function Live2DView() {
         data-transparent="true"
       />
 
-      {/* 录制区域边框 */}
-      <RecordingBounds
-        showRecordingBounds={showRecordingBounds}
-        customRecordingBounds={customRecordingBounds}
-        onBoundsChange={setCustomRecordingBounds}
-      />
+             {/* 录制区域边框 */}
+       <RecordingBounds
+         showRecordingBounds={showRecordingBounds}
+         customRecordingBounds={customRecordingBounds}
+         onBoundsChange={setCustomRecordingBounds}
+       />
+
+       {/* WebGAL模式 */}
+       {showWebGALMode && (
+         <WebGALMode
+           onClose={() => setShowWebGALMode(false)}
+           onImportTimeline={importWebGALTimeline}
+         />
+       )}
 
       {/* 控制面板 */}
       {showControls && (
-        <ControlPanel
-          onClose={() => setShowControls(false)}
+                 <ControlPanel
+           onClose={() => setShowControls(false)}
+           onToggleWebGALMode={() => setShowWebGALMode(!showWebGALMode)}
 
           // 模型选择
           modelList={modelList}
@@ -638,7 +798,7 @@ export default function Live2DView() {
               try {
                 analyzerData.source.disconnect();
                 analyzerData.analyzer.disconnect();
-              } catch {}
+              } catch { /* empty */ }
               audioManager.audioAnalyzersRef.current.delete(id);
             }
           }

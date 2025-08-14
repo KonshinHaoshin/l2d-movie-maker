@@ -1,0 +1,373 @@
+/* =========================
+   WebGAL Mode — 基础变量
+   ========================= */
+   :root {
+    --wg-overlay: rgba(0, 0, 0, 0.55);
+    --wg-panel-bg: #ffffff;
+    --wg-panel-border: #e6e8ec;
+    --wg-text: #1f2328;
+    --wg-text-muted: #667085;
+    --wg-primary: #0d6efd;
+    --wg-primary-pressed: #0b5ed7;
+    --wg-success: #28a745;
+    --wg-success-pressed: #218838;
+    --wg-danger: #dc3545;
+    --wg-danger-pressed: #c12a38;
+    --wg-warning: #ffb703;
+    --wg-neutral: #6c757d;
+    --wg-neutral-pressed: #5a6268;
+    --wg-chip: #eef2ff;
+    --wg-chip-text: #4338ca;
+    --wg-code-bg: #0b1020;
+    --wg-shadow: 0 20px 50px rgba(0,0,0,.25);
+    --wg-radius: 12px;
+    --wg-radius-sm: 8px;
+    --wg-gap: 16px;
+  }
+  
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --wg-overlay: rgba(0,0,0,.65);
+      --wg-panel-bg: #121417;
+      --wg-panel-border: #22262b;
+      --wg-text: #e6e8ea;
+      --wg-text-muted: #a0a6ad;
+      --wg-primary: #6ea8fe;
+      --wg-primary-pressed: #5c96ec;
+      --wg-success: #43c06a;
+      --wg-success-pressed: #36a95a;
+      --wg-danger: #ff6b6b;
+      --wg-danger-pressed: #e75858;
+      --wg-warning: #ffd166;
+      --wg-neutral: #8b95a1;
+      --wg-neutral-pressed: #7a8591;
+      --wg-chip: #1c2230;
+      --wg-chip-text: #c6d4ff;
+      --wg-code-bg: #0b1020;
+      --wg-shadow: 0 24px 60px rgba(0,0,0,.45);
+    }
+  }
+  
+  /* =========================
+     遮罩 & 容器
+     ========================= */
+  .webgal-mode {
+    position: fixed;
+    inset: 0;
+    background: var(--wg-overlay);
+    backdrop-filter: blur(4px);
+    display: grid;
+    place-items: center;
+    z-index: 1000;
+  
+    animation: wg-fade-in .18s ease-out;
+  }
+  
+  @keyframes wg-fade-in {
+    from { opacity: 0 }
+    to   { opacity: 1 }
+  }
+  
+  /* 内层弹窗容器（若你的 JSX 没包一层，也能兼容直接作用在 .webgal-mode 上的布局） */
+  .webgal-modal {
+    width: min(960px, calc(100vw - 40px));
+    max-height: min(84vh, 100vh - 40px);
+    overflow: auto;
+    background: var(--wg-panel-bg);
+    color: var(--wg-text);
+    border: 1px solid var(--wg-panel-border);
+    border-radius: var(--wg-radius);
+    box-shadow: var(--wg-shadow);
+    padding: 20px;
+    scrollbar-gutter: stable;
+  
+    animation: wg-pop .18s ease-out;
+  }
+  
+  @keyframes wg-pop {
+    from { transform: translateY(6px) scale(.98); opacity: .98; }
+    to   { transform: translateY(0)   scale(1);    opacity: 1;   }
+  }
+  
+  /* 如果直接把内容放在 .webgal-mode 下，这里兜底： */
+  .webgal-mode > .webgal-header,
+  .webgal-mode > .webgal-section,
+  .webgal-mode > .webgal-actions,
+  .webgal-mode > .webgal-error { 
+    width: min(960px, calc(100vw - 40px));
+    background: var(--wg-panel-bg);
+    color: var(--wg-text);
+    border: 1px solid var(--wg-panel-border);
+    border-radius: var(--wg-radius);
+    box-shadow: var(--wg-shadow);
+    padding: 20px;
+  }
+  
+  /* =========================
+     头部
+     ========================= */
+  .webgal-header {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: linear-gradient(to bottom, var(--wg-panel-bg) 70%, color-mix(in oklab, var(--wg-panel-bg), transparent 100%) 100%);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--wg-gap);
+    padding-bottom: 10px;
+    margin-bottom: 10px;
+    border-bottom: 1px dashed var(--wg-panel-border);
+  }
+  
+  .webgal-header h3 {
+    margin: 0;
+    font-size: 20px;
+    letter-spacing: .2px;
+  }
+  
+  .webgal-close {
+    border: none;
+    background: transparent;
+    color: var(--wg-text-muted);
+    font-size: 22px;
+    line-height: 1;
+    padding: 6px 8px;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .webgal-close:hover { background: color-mix(in oklab, var(--wg-text-muted), transparent 85%); color: var(--wg-text); }
+  
+  /* =========================
+     分区
+     ========================= */
+  .webgal-section {
+    margin: 14px 0;
+    display: grid;
+    gap: 10px;
+  }
+  
+  .webgal-section h4,
+  .webgal-section-title {
+    margin: 0 0 6px 0;
+    font-size: 16px;
+    font-weight: 700;
+  }
+  
+  /* 目录选择器 */
+  .directory-selector {
+    display: grid;
+    gap: 10px;
+  }
+  @media (min-width: 640px) {
+    .directory-selector {
+      grid-template-columns: 1fr auto;
+      align-items: center;
+    }
+  }
+  
+  .directory-input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1.5px solid var(--wg-panel-border);
+    border-radius: var(--wg-radius-sm);
+    background: color-mix(in oklab, var(--wg-panel-bg), #000 2%);
+    color: var(--wg-text);
+    font-size: 14px;
+  }
+  .directory-input:focus {
+    outline: none;
+    border-color: var(--wg-primary);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--wg-primary), transparent 85%);
+  }
+  
+  /* 说明文字 */
+  .directory-info,
+  .script-info {
+    color: var(--wg-text-muted);
+    font-size: 12px;
+  }
+  
+  /* =========================
+     按钮体系
+     ========================= */
+  .select-dir-btn,
+  .example-btn,
+  .clear-btn,
+  .parse-btn,
+  .import-btn,
+  .cancel-btn,
+  .webgal-btn {
+    border: none;
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: transform .05s ease, filter .15s ease, background .15s ease;
+    will-change: transform;
+  }
+  
+  .select-dir-btn,
+  .example-btn { background: var(--wg-primary); color: #fff; }
+  .select-dir-btn:hover,
+  .example-btn:hover { background: var(--wg-primary-pressed); }
+  
+  .clear-btn { background: var(--wg-neutral); color: #fff; }
+  .clear-btn:hover { background: var(--wg-neutral-pressed); }
+  
+  .parse-btn { background: var(--wg-success); color: #fff; }
+  .parse-btn:hover { background: var(--wg-success-pressed); }
+  
+  .import-btn { background: var(--wg-primary); color: #fff; }
+  .import-btn:hover { background: var(--wg-primary-pressed); }
+  
+  .cancel-btn { background: transparent; color: var(--wg-text-muted); border: 1px dashed var(--wg-panel-border); }
+  .cancel-btn:hover { color: var(--wg-text); background: color-mix(in oklab, var(--wg-text-muted), transparent 90%); }
+  
+  .select-dir-btn:active,
+  .example-btn:active,
+  .clear-btn:active,
+  .parse-btn:active,
+  .import-btn:active,
+  .cancel-btn:active,
+  .webgal-btn:active { transform: translateY(1px); }
+  
+  /* 头部右上角“示例/清空” */
+  .script-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--wg-gap);
+  }
+  .script-actions { display: flex; gap: 8px; }
+  
+  /* =========================
+     文本域（脚本输入）
+     ========================= */
+  .script-input {
+    width: 100%;
+    min-height: 220px;
+    resize: vertical;
+    padding: 12px 14px;
+    border-radius: var(--wg-radius-sm);
+    border: 1.5px solid var(--wg-panel-border);
+    background: color-mix(in oklab, var(--wg-panel-bg), #000 3%);
+    color: var(--wg-text);
+    font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    tab-size: 2;
+  }
+  .script-input:focus {
+    outline: none;
+    border-color: var(--wg-primary);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--wg-primary), transparent 85%);
+  }
+  
+  /* =========================
+     错误提示
+     ========================= */
+  .webgal-error {
+    border: 1px solid color-mix(in oklab, var(--wg-danger), #000 10%);
+    background: color-mix(in oklab, var(--wg-danger), transparent 92%);
+    color: color-mix(in oklab, var(--wg-danger), #000 15%);
+    border-radius: var(--wg-radius-sm);
+    padding: 10px 12px;
+    font-size: 13px;
+  }
+  
+  /* =========================
+     解析结果（命令预览）
+     ========================= */
+  .commands-preview {
+    display: grid;
+    gap: 10px;
+  }
+  
+  .command-item {
+    border: 1px solid var(--wg-panel-border);
+    border-radius: 10px;
+    padding: 10px 12px;
+    background: color-mix(in oklab, var(--wg-panel-bg), #000 2%);
+  }
+  
+  .command-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  
+  .command-type {
+    font-size: 12px;
+    font-weight: 700;
+    background: var(--wg-chip);
+    color: var(--wg-chip-text);
+    padding: 4px 8px;
+    border-radius: 999px;
+  }
+  .command-line {
+    font-size: 12px;
+    color: var(--wg-text-muted);
+  }
+  
+  .command-content {
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  .command-content strong {
+    color: var(--wg-text);
+  }
+  
+  /* =========================
+     底部操作区
+     ========================= */
+  .webgal-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    margin-top: 4px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--wg-panel-border);
+  }
+  
+  /* =========================
+     预览（可选使用）
+     ========================= */
+  .webgal-preview {
+    border: 1px solid var(--wg-panel-border);
+    border-radius: 10px;
+    background: color-mix(in oklab, var(--wg-panel-bg), #000 3%);
+    padding: 12px;
+  }
+  .webgal-preview-title {
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .webgal-preview-content {
+    background: var(--wg-code-bg);
+    color: #dbeafe;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    white-space: pre-wrap;
+  }
+  
+  /* =========================
+     自定义滚动条（可选）
+     ========================= */
+  .webgal-modal::-webkit-scrollbar { width: 10px; }
+  .webgal-modal::-webkit-scrollbar-thumb {
+    background: color-mix(in oklab, var(--wg-text-muted), transparent 60%);
+    border-radius: 999px;
+  }
+  .webgal-modal::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklab, var(--wg-text-muted), transparent 45%);
+  }
+  
+  /* 小屏优化 */
+  @media (max-width: 480px) {
+    .webgal-modal { padding: 14px; }
+    .script-input { min-height: 180px; }
+    .webgal-actions { flex-direction: column; }
+  }
+  

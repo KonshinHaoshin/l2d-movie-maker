@@ -10,6 +10,17 @@
 
     "fs:allow-appcache-read-recursive",
     "fs:allow-appcache-write-recursive",
-    "fs:scope-appcache-recursive"
+    "fs:scope-appcache-recursive",
+    
+    "fs:read-all",
+    "fs:write-all",
+    "fs:allow-read",
+    "fs:allow-write",
+    "fs:allow-read-file",
+    "fs:allow-read-dir",
+    "fs:scope",
+    "fs:allow-create",
+    "fs:allow-exists",
+    "fs:allow-open"
   ]
 }
