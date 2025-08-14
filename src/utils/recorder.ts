@@ -22,6 +22,8 @@ export function createVp9AlphaRecorder(
         autoStop?: boolean;
         onProgress?: (time: number) => void;
         transparent?: boolean;
+        audioClips?: Array<{ id: string; start: number; duration: number; audioUrl: string }>;
+        timelineLength?: number;
     }
 ) {
     let mr: MediaRecorder | null = null;
@@ -31,6 +33,8 @@ export function createVp9AlphaRecorder(
     let stream: MediaStream | null = null;
     let recordingStartTime: number = 0;
     let progressInterval: number | null = null;
+    let audioElements: Map<string, HTMLAudioElement> = new Map();
+    let audioDestination: MediaStreamAudioDestinationNode | null = null;
 
     function makeStream(): MediaStream {
         // 强制设置canvas透明背景
@@ -46,20 +50,53 @@ export function createVp9AlphaRecorder(
         const s = canvas.captureStream(fps);
         console.log("[rec] captureStream fps=", fps, "tracks=", s.getTracks().map(t => t.kind));
         
-        // 添加静音音频轨道，避免部分实现不产块
+        // 创建音频上下文和混合器
         try {
             ac = new AudioContext();
-            cs = ac.createConstantSource();
-            const g = ac.createGain();
-            g.gain.value = 0; // 静音
-            const dest = ac.createMediaStreamDestination();
-            cs.connect(g).connect(dest);
-            cs.start();
-            const at = dest.stream.getAudioTracks()[0];
-            if (at) s.addTrack(at);
-            console.log("[rec] added silent audio track");
+            audioDestination = ac.createMediaStreamDestination();
+            
+            // 如果有音频片段，创建音频轨道
+            if (options?.audioClips && options.audioClips.length > 0) {
+                console.log("[rec] 设置音频轨道，音频片段数:", options.audioClips.length);
+                
+                options.audioClips.forEach(clip => {
+                    try {
+                        const audio = new Audio(clip.audioUrl);
+                        audio.preload = 'auto';
+                        audio.volume = 0.8;
+                        
+                        // 创建音频源节点
+                        const source = ac!.createMediaElementSource(audio);
+                        source.connect(audioDestination!);
+                        
+                        // 存储音频元素引用
+                        audioElements.set(clip.id, audio);
+                        
+                        console.log(`[rec] 音频轨道 ${clip.id} 已连接`);
+                    } catch (error) {
+                        console.warn(`[rec] 音频轨道 ${clip.id} 连接失败:`, error);
+                    }
+                });
+                
+                // 将混合后的音频添加到视频流
+                const audioTrack = audioDestination.stream.getAudioTracks()[0];
+                if (audioTrack) {
+                    s.addTrack(audioTrack);
+                    console.log("[rec] 混合音频轨道已添加到录制流");
+                }
+            } else {
+                // 如果没有音频，添加静音轨道避免部分实现不产块
+                cs = ac.createConstantSource();
+                const g = ac.createGain();
+                g.gain.value = 0; // 静音
+                cs.connect(g).connect(audioDestination!);
+                cs.start();
+                const at = audioDestination!.stream.getAudioTracks()[0];
+                if (at) s.addTrack(at);
+                console.log("[rec] added silent audio track");
+            }
         } catch (e) {
-            console.warn("[rec] audio track add failed (ok to ignore):", e);
+            console.warn("[rec] audio track setup failed:", e);
         }
         
         stream = s;
@@ -103,6 +140,44 @@ export function createVp9AlphaRecorder(
                     options.onProgress!(elapsed);
                 }, 100);
             }
+            
+            // 按照时间线顺序启动音频播放
+            if (options?.audioClips && options.audioClips.length > 0) {
+                console.log("[rec] 启动音频按时间线顺序播放");
+                
+                // 按开始时间排序音频片段
+                const sortedClips = [...options.audioClips].sort((a, b) => a.start - b.start);
+                
+                sortedClips.forEach((clip) => {
+                    const audio = audioElements.get(clip.id);
+                    if (audio) {
+                        // 延迟播放，按照时间线上的开始时间
+                        setTimeout(() => {
+                            try {
+                                audio.currentTime = 0;
+                                audio.play().then(() => {
+                                    console.log(`[rec] 音频 ${clip.id} 在 ${clip.start}s 开始播放，持续 ${clip.duration}s`);
+                                }).catch(err => {
+                                    console.warn(`[rec] 音频 ${clip.id} 播放失败:`, err);
+                                });
+                                
+                                // 在片段结束后自动停止
+                                setTimeout(() => {
+                                    try {
+                                        audio.pause();
+                                        audio.currentTime = 0;
+                                        console.log(`[rec] 音频 ${clip.id} 播放结束`);
+                                    } catch (e) {
+                                        console.warn(`[rec] 停止音频 ${clip.id} 失败:`, e);
+                                    }
+                                }, clip.duration * 1000);
+                            } catch (e) {
+                                console.warn(`[rec] 处理音频 ${clip.id} 失败:`, e);
+                            }
+                        }, clip.start * 1000);
+                    }
+                });
+            }
         };
         
         mr.onstop = () => {
@@ -111,6 +186,16 @@ export function createVp9AlphaRecorder(
                 clearInterval(progressInterval);
                 progressInterval = null;
             }
+            
+            // 停止所有音频播放
+            audioElements.forEach(audio => {
+                try {
+                    audio.pause();
+                    audio.currentTime = 0;
+                } catch (e) {
+                    console.warn("[rec] 停止音频失败:", e);
+                }
+            });
         };
         
         // 用 timeslice 让实现周期性产块，更稳
@@ -145,10 +230,23 @@ export function createVp9AlphaRecorder(
             clearInterval(progressInterval);
             progressInterval = null;
         }
+        
+        // 清理音频元素
+        audioElements.forEach(audio => {
+            try {
+                audio.pause();
+                audio.src = '';
+            } catch (e) {
+                console.warn("[rec] 清理音频元素失败:", e);
+            }
+        });
+        audioElements.clear();
+        
         mr = null; 
         cs = null; 
         ac = null;
         stream = null;
+        audioDestination = null;
     }
 
     async function saveWebM(blob: Blob, defaultName = "export-alpha.webm") {

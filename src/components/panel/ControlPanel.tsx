@@ -55,13 +55,7 @@ type Props = {
 
   clearTimeline: () => void;
 
-  // 录制控制
-  useModelFrame?: boolean;
-  setUseModelFrame?: (v: boolean) => void;
-  showFrameBorder?: boolean;
-  setShowFrameBorder?: (v: boolean) => void;
-  modelBounds?: { x: number; y: number; width: number; height: number };
-  setModelBounds?: (bounds: { x: number; y: number; width: number; height: number }) => void;
+
 
   onChangeClip?: (
     track: TrackKind,
@@ -344,16 +338,7 @@ const ControlPanel: React.FC<Props> = (props) => {
           >
             🎵 导入音频
           </button>
-          {props.debugModelParameters && (
-            <button 
-              className="btn" 
-              onClick={props.debugModelParameters}
-              style={{ background: '#6b35ff', color: 'white' }}
-              title="调试模型参数，查看控制台输出"
-            >
-              🔍 调试参数
-            </button>
-          )}
+
         </div>
         
         {/* 音频控制提示 */}
@@ -402,72 +387,7 @@ const ControlPanel: React.FC<Props> = (props) => {
         )}
       </div>
 
-      {/* 录制设置 */}
-      <div className="l2d-section">
-        <h4 className="l2d-section-title">🎥 录制设置</h4>
-        
-        {/* 模型边框录制优化 */}
-        <div className="row" style={{ gap: 8, marginTop: 8, alignItems: "center" }}>
-          <label className="muted">
-            <input
-              type="checkbox"
-              checked={props.useModelFrame || false}
-              onChange={(e) => props.setUseModelFrame?.(e.target.checked)}
-              style={{ width: 16, height: 16, marginRight: 8 }}
-            />
-            启用模型边框录制优化
-          </label>
-        </div>
-        
-        {props.useModelFrame && (
-          <>
-            <div className="row" style={{ gap: 8, marginTop: 6, alignItems: "center" }}>
-              <label className="muted">
-                <input
-                  type="checkbox"
-                  checked={props.showFrameBorder || false}
-                  onChange={(e) => props.setShowFrameBorder?.(e.target.checked)}
-                  style={{ width: 16, height: 16, marginRight: 8 }}
-                />
-                显示录制区域边框
-              </label>
-            </div>
-            
-            {props.modelBounds && (
-              <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
-                录制区域: {props.modelBounds.width.toFixed(0)} × {props.modelBounds.height.toFixed(0)} px
-                <br />
-                位置: ({props.modelBounds.x.toFixed(0)}, {props.modelBounds.y.toFixed(0)})
-              </div>
-            )}
-          </>
-        )}
-        
-        <div className="row" style={{ gap: 8, marginTop: 8 }}>
-          <span>FPS:</span>
-          <select className="input" style={{ width: 80 }} defaultValue="60">
-            <option value="30">30</option>
-            <option value="60">60</option>
-            <option value="120">120</option>
-          </select>
-        </div>
-        <div className="row" style={{ gap: 8, marginTop: 6 }}>
-          <span>质量(kbps):</span>
-          <select className="input" style={{ width: 80 }} defaultValue="16000">
-            <option value="8000">8000</option>
-            <option value="16000">16000</option>
-            <option value="32000">32000</option>
-          </select>
-        </div>
-        <div className="row" style={{ gap: 8, marginTop: 6 }}>
-          <span>格式:</span>
-          <select className="input" style={{ width: 120 }} defaultValue="vp9">
-            <option value="vp9">VP9 (推荐)</option>
-            <option value="vp8">VP8</option>
-            <option value="webm">WebM</option>
-          </select>
-        </div>
-      </div>
+      
     </div>
   );
 };

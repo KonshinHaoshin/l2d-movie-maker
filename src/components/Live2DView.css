@@ -232,9 +232,15 @@
 .tl-clips { position: relative; }
 
 .tl-clip {
-    position: absolute; display: flex; align-items: center; gap: 8px;
-    padding: 0 8px; color: #fff; border-radius: 6px;
+    position: absolute !important; 
+    display: flex; 
+    align-items: center; 
+    gap: 8px;
+    padding: 0 8px; 
+    color: #fff; 
+    border-radius: 6px;
     box-shadow: inset 0 0 0 1px rgba(255,255,255,.12);
+    z-index: 10;
 }
 .tl-clip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; font-size: 12px; }
 .tl-clip-dur { font-size: 11px; opacity: .8; }
@@ -333,7 +339,9 @@
 }
 
 /* 便于肉眼确认（可删） */
-.tl-clip { box-shadow: inset 0 0 0 1px rgba(255,255,255,.2); }
+.tl-clip { 
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.2) !important; 
+}
 
 /* 音频轨特殊样式 */
 .tl-clip--audio {
@@ -497,29 +505,11 @@
     border: 1px solid #404040;
 }
 
-.tl-clip {
-    background: #404040;
-    border: 1px solid #606060;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-}
-
-.tl-clip:hover {
-    background: #505050;
-    border-color: #707070;
-    transform: translateY(-1px);
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
-}
+/* 删除重复的tl-clip样式定义 */
 
 .tl-ruler:hover {
     background: #1e1e1e;
     border-color: #505050;
 }
 
-.tl-root {
-    background: #1a1a1a;
-    padding: 12px;
-    border-radius: 8px;
-    margin: 8px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-    min-height: 180px; /* 减少最小高度 */
-}
+/* 删除重复的tl-root样式定义 */

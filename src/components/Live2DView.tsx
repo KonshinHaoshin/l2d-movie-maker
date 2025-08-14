@@ -213,40 +213,7 @@ export default function Live2DView() {
     }
   };
 
-  // 调试：列出可用的参数
-  const debugModelParameters = () => {
-    try {
-      forEachModel((model) => {
-        const internalModel = (model as any).internalModel;
-        if (!internalModel || !internalModel.parameters) return;
-        
-        console.log('🔍 模型参数列表:');
-        const paramNames = [];
-        for (let i = 0; i < internalModel.parameters.count; i++) {
-          const param = internalModel.parameters.get(i);
-          if (param && param.id) {
-            paramNames.push(param.id);
-          }
-        }
-        
-        // 过滤出嘴部相关参数
-        const mouthParams = paramNames.filter(name => 
-          name.toLowerCase().includes('mouth') || 
-          name.toLowerCase().includes('param') ||
-          name.toLowerCase().includes('a') ||
-          name.toLowerCase().includes('i') ||
-          name.toLowerCase().includes('u') ||
-          name.toLowerCase().includes('e') ||
-          name.toLowerCase().includes('o')
-        );
-        
-        console.log('👄 嘴部相关参数:', mouthParams);
-        console.log('📋 所有参数数量:', paramNames.length);
-      });
-    } catch (error) {
-      console.warn('调试参数失败:', error);
-    }
-  };
+
 
   const clearTimeline = () => { 
     setMotionClips([]); 
@@ -290,10 +257,12 @@ export default function Live2DView() {
   const [transparentBg, setTransparentBg] = useState(true);
   const [blob, setBlob] = useState<Blob | null>(null);
   
-  // —— 模型边框录制 —— //
-  const [useModelFrame, setUseModelFrame] = useState(false);
-  const [showFrameBorder, setShowFrameBorder] = useState(true);
-  const [modelBounds, setModelBounds] = useState({ x: 0, y: 0, width: 800, height: 600 });
+     // —— 用户自定义录制范围 —— //
+   const [customRecordingBounds, setCustomRecordingBounds] = useState({ x: 0, y: 0, width: 800, height: 600 });
+   const [showRecordingBounds, setShowRecordingBounds] = useState(false);
+   
+   // —— 录制质量设置 —— //
+   const [recordingQuality, setRecordingQuality] = useState<"low" | "medium" | "high">("medium");
 
   // —— 工具 —— //
   const isJsonl = (u: string) => /\.jsonl(\?|#|$)/i.test(u);
@@ -819,25 +788,29 @@ export default function Live2DView() {
       return;
     }
 
-    // 根据设置选择录制器类型
-    if (useModelFrame) {
-      // 使用模型边框录制器（裁剪）
-      recRef.current = createModelFrameRecorder(canvasRef.current, modelBounds, 60, 16000, {
-        onProgress: (time: number) => {
-          setRecordingTime(time);
-          setRecordingProgress((time / totalDuration) * 100);
-        },
-        showFrame: showFrameBorder
-      });
-    } else {
-      // 使用全屏录制器
-      recRef.current = createVp9AlphaRecorder(canvasRef.current, 60, 16000, {
-        onProgress: (time: number) => {
-          setRecordingTime(time);
-          setRecordingProgress((time / totalDuration) * 100);
-        }
-      });
-    }
+    // 根据质量设置选择录制参数
+    const qualitySettings = {
+      low: { fps: 24, kbps: 4000 },
+      medium: { fps: 30, kbps: 8000 },
+      high: { fps: 60, kbps: 16000 }
+    };
+    
+    const settings = qualitySettings[recordingQuality];
+    
+    // 使用全屏录制器，包含音频轨道
+    recRef.current = createVp9AlphaRecorder(canvasRef.current, settings.fps, settings.kbps, {
+      onProgress: (time: number) => {
+        setRecordingTime(time);
+        setRecordingProgress((time / totalDuration) * 100);
+      },
+      audioClips: audioClips.map(clip => ({
+        id: clip.id,
+        start: clip.start,
+        duration: clip.duration,
+        audioUrl: clip.audioUrl!
+      })),
+      timelineLength: totalDuration
+    });
 
     recRef.current.start();
     setRecState("rec");
@@ -896,12 +869,12 @@ export default function Live2DView() {
         const mh = model.height * model.scale.y;
         const mx = model.position.x - mw / 2;
         const my = model.position.y - mh / 2;
-        setModelBounds({
-          x: Math.max(0, mx),
-          y: Math.max(0, my),
-          width: Math.min(mw, appRef.current!.screen.width),
-          height: Math.min(mh, appRef.current!.screen.height),
-        });
+                 setCustomRecordingBounds({
+           x: Math.max(0, mx),
+           y: Math.max(0, my),
+           width: Math.min(mw, appRef.current!.screen.width),
+           height: Math.min(mh, appRef.current!.screen.height),
+         });
       }
     });
 
@@ -942,7 +915,7 @@ export default function Live2DView() {
         container.position.x = e.data.global.x - (container as any)._pointerX;
         container.position.y = e.data.global.y - (container as any)._pointerY;
         const b = container.getBounds();
-        setModelBounds({
+        setCustomRecordingBounds({
           x: Math.max(0, b.x),
           y: Math.max(0, b.y),
           width: Math.min(b.width, appRef.current!.screen.width),
@@ -1011,19 +984,15 @@ export default function Live2DView() {
       const modelX = model.position.x - modelWidth / 2;
       const modelY = model.position.y - modelHeight / 2;
       
-      setModelBounds({
-        x: Math.max(0, modelX),
-        y: Math.max(0, modelY),
-        width: Math.min(modelWidth, app.screen.width),
-        height: Math.min(modelHeight, app.screen.height)
-      });
+             setCustomRecordingBounds({
+         x: Math.max(0, modelX),
+         y: Math.max(0, modelY),
+         width: Math.min(modelWidth, app.screen.width),
+         height: Math.min(modelHeight, app.screen.height)
+       });
       
       console.log("📐 模型边框计算:", { modelWidth, modelHeight, modelX, modelY });
       
-      // 延迟调试参数，确保模型完全加载
-      setTimeout(() => {
-        debugModelParameters();
-      }, 1000);
     } catch (err) {
       console.error("❌ 模型加载失败:", err);
       setModelData(null);
@@ -1141,12 +1110,12 @@ export default function Live2DView() {
       // 计算联合包围盒（用于裁剪录制）
       requestAnimationFrame(() => {
         const b = group.getBounds();
-        setModelBounds({
-          x: Math.max(0, b.x),
-          y: Math.max(0, b.y),
-          width: Math.min(b.width, app.screen.width),
-          height: Math.min(b.height, app.screen.height),
-        });
+                 setCustomRecordingBounds({
+           x: Math.max(0, b.x),
+           y: Math.max(0, b.y),
+           width: Math.min(b.width, app.screen.width),
+           height: Math.min(b.height, app.screen.height),
+         });
         console.log("📦 JSONL 复合包围盒:", b);
       });
 
@@ -1181,10 +1150,6 @@ export default function Live2DView() {
       modelRef.current = children;     // 存为数组
       isCompositeRef.current = true;
       
-      // 延迟调试参数，确保模型完全加载
-      setTimeout(() => {
-        debugModelParameters();
-      }, 1000);
     } catch (err) {
       console.error("loadJsonlComposite error:", err);
       setModelData(null);
@@ -1209,6 +1174,169 @@ export default function Live2DView() {
         style={{ background: "transparent", display: "block" }}
         data-transparent="true"
       />
+      
+             {/* 录制区域边框 */}
+       {showRecordingBounds && (
+         <div
+           style={{
+             position: "absolute",
+             left: customRecordingBounds.x,
+             top: customRecordingBounds.y,
+             width: customRecordingBounds.width,
+             height: customRecordingBounds.height,
+             border: "2px solid #000000",
+             pointerEvents: "auto",
+             zIndex: 999,
+             boxShadow: "0 0 10px rgba(0,0,0,0.5)",
+             cursor: "move"
+           }}
+           onMouseDown={(e) => {
+             e.preventDefault();
+             const startX = e.clientX;
+             const startY = e.clientY;
+             const startBounds = { ...customRecordingBounds };
+             
+             const handleMouseMove = (moveEvent: MouseEvent) => {
+               const deltaX = moveEvent.clientX - startX;
+               const deltaY = moveEvent.clientY - startY;
+               
+               setCustomRecordingBounds({
+                 x: Math.max(0, startBounds.x + deltaX),
+                 y: Math.max(0, startBounds.y + deltaY),
+                 width: startBounds.width,
+                 height: startBounds.height
+               });
+             };
+             
+             const handleMouseUp = () => {
+               document.removeEventListener('mousemove', handleMouseMove);
+               document.removeEventListener('mouseup', handleMouseUp);
+             };
+             
+             document.addEventListener('mousemove', handleMouseMove);
+             document.addEventListener('mouseup', handleMouseUp);
+           }}
+         >
+           {/* 调整大小的手柄 */}
+           <div
+             style={{
+               position: "absolute",
+               right: -5,
+               bottom: -5,
+               width: 10,
+               height: 10,
+               background: "#000000",
+               border: "1px solid #ffffff",
+               cursor: "nw-resize"
+             }}
+             onMouseDown={(e) => {
+               e.stopPropagation();
+               const startX = e.clientX;
+               const startY = e.clientY;
+               const startBounds = { ...customRecordingBounds };
+               
+               const handleMouseMove = (moveEvent: MouseEvent) => {
+                 const deltaX = moveEvent.clientX - startX;
+                 const deltaY = moveEvent.clientY - startY;
+                 
+                 const newWidth = Math.max(100, startBounds.width + deltaX);
+                 const newHeight = Math.max(100, startBounds.height + deltaY);
+                 
+                 setCustomRecordingBounds({
+                   x: startBounds.x,
+                   y: startBounds.y,
+                   width: newWidth,
+                   height: newHeight
+                 });
+               };
+               
+               const handleMouseUp = () => {
+                 document.removeEventListener('mousemove', handleMouseMove);
+                 document.removeEventListener('mouseup', handleMouseUp);
+               };
+               
+               document.addEventListener('mousemove', handleMouseMove);
+               document.addEventListener('mouseup', handleMouseUp);
+             }}
+           />
+           
+           {/* 调整宽度的右侧手柄 */}
+           <div
+             style={{
+               position: "absolute",
+               right: -5,
+               top: "50%",
+               transform: "translateY(-50%)",
+               width: 10,
+               height: 20,
+               background: "#000000",
+               border: "1px solid #ffffff",
+               cursor: "ew-resize"
+             }}
+             onMouseDown={(e) => {
+               e.stopPropagation();
+               const startX = e.clientX;
+               const startBounds = { ...customRecordingBounds };
+               
+               const handleMouseMove = (moveEvent: MouseEvent) => {
+                 const deltaX = moveEvent.clientX - startX;
+                 const newWidth = Math.max(100, startBounds.width + deltaX);
+                 
+                 setCustomRecordingBounds({
+                   ...startBounds,
+                   width: newWidth
+                 });
+               };
+               
+               const handleMouseUp = () => {
+                 document.removeEventListener('mousemove', handleMouseMove);
+                 document.removeEventListener('mouseup', handleMouseUp);
+               };
+               
+               document.addEventListener('mousemove', handleMouseMove);
+               document.addEventListener('mouseup', handleMouseUp);
+             }}
+           />
+           
+           {/* 调整高度的底部手柄 */}
+           <div
+             style={{
+               position: "absolute",
+               left: "50%",
+               bottom: -5,
+               transform: "translateX(-50%)",
+               width: 20,
+               height: 10,
+               background: "#000000",
+               border: "1px solid #ffffff",
+               cursor: "ns-resize"
+             }}
+             onMouseDown={(e) => {
+               e.stopPropagation();
+               const startY = e.clientY;
+               const startBounds = { ...customRecordingBounds };
+               
+               const handleMouseMove = (moveEvent: MouseEvent) => {
+                 const deltaY = moveEvent.clientY - startY;
+                 const newHeight = Math.max(100, startBounds.height + deltaY);
+                 
+                 setCustomRecordingBounds({
+                   ...startBounds,
+                   height: newHeight
+                 });
+               };
+               
+               const handleMouseUp = () => {
+                 document.removeEventListener('mousemove', handleMouseMove);
+                 document.removeEventListener('mouseup', handleMouseUp);
+               };
+               
+               document.addEventListener('mousemove', handleMouseMove);
+               document.addEventListener('mouseup', handleMouseUp);
+             }}
+           />
+         </div>
+       )}
 
       {/* 控制面板 */}
       {showControls && (
@@ -1234,7 +1362,7 @@ export default function Live2DView() {
           addMotionClip={addMotionClip}
           addExprClip={addExprClip}
           addAudioClip={addAudioClip}
-          debugModelParameters={debugModelParameters}
+
           enableDragging={enableDragging}
           setEnableDragging={setEnableDragging}
           isDragging={isDragging}
@@ -1252,13 +1380,7 @@ export default function Live2DView() {
           onSetPlayhead={setPlayheadSec}
           currentAudioLevel={currentAudioLevel}
           
-          // 录制控制选项
-          useModelFrame={useModelFrame}
-          setUseModelFrame={setUseModelFrame}
-          showFrameBorder={showFrameBorder}
-          setShowFrameBorder={setShowFrameBorder}
-          modelBounds={modelBounds}
-          setModelBounds={setModelBounds}
+
         />
       )}
 
@@ -1318,18 +1440,193 @@ export default function Live2DView() {
           pointerEvents: "auto",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <input
-            type="checkbox"
-            id="transparentBg"
-            checked={transparentBg}
-            onChange={(e) => setTransparentBg(e.target.checked)}
-            style={{ width: 16, height: 16 }}
-          />
-        <label htmlFor="transparentBg" style={{ fontSize: "12px" }}>
-            透明背景
-          </label>
-        </div>
+                 {/* 录制范围设置 */}
+         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+           <input
+             type="checkbox"
+             id="showRecordingBounds"
+             checked={showRecordingBounds}
+             onChange={(e) => setShowRecordingBounds(e.target.checked)}
+             style={{ width: 16, height: 16 }}
+           />
+           <label htmlFor="showRecordingBounds" style={{ fontSize: "12px" }}>
+             显示录制区域边框
+           </label>
+         </div>
+         
+         {showRecordingBounds && (
+           <>
+             <div style={{ fontSize: "11px", color: "#ccc" }}>
+               录制区域: {customRecordingBounds.width.toFixed(0)} × {customRecordingBounds.height.toFixed(0)} px
+               <br />
+               位置: ({customRecordingBounds.x.toFixed(0)}, {customRecordingBounds.y.toFixed(0)})
+             </div>
+             
+             {/* 录制范围调整控件 */}
+             <div style={{ fontSize: "11px", marginTop: 8 }}>
+               <div style={{ marginBottom: 4 }}>调整录制范围:</div>
+               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, fontSize: "10px" }}>
+                 <div>
+                   <label>X:</label>
+                   <input
+                     type="number"
+                     value={customRecordingBounds.x}
+                     onChange={(e) => setCustomRecordingBounds(prev => ({ ...prev, x: Number(e.target.value) }))}
+                     style={{ width: "100%", padding: "2px", fontSize: "10px" }}
+                   />
+                 </div>
+                 <div>
+                   <label>Y:</label>
+                   <input
+                     type="number"
+                     value={customRecordingBounds.y}
+                     onChange={(e) => setCustomRecordingBounds(prev => ({ ...prev, y: Number(e.target.value) }))}
+                     style={{ width: "100%", padding: "2px", fontSize: "10px" }}
+                   />
+                 </div>
+                 <div>
+                   <label>宽度:</label>
+                   <input
+                     type="number"
+                     value={customRecordingBounds.width}
+                     onChange={(e) => setCustomRecordingBounds(prev => ({ ...prev, width: Number(e.target.value) }))}
+                     style={{ width: "100%", padding: "2px", fontSize: "10px" }}
+                   />
+                 </div>
+                 <div>
+                   <label>高度:</label>
+                   <input
+                     type="number"
+                     value={customRecordingBounds.height}
+                     onChange={(e) => setCustomRecordingBounds(prev => ({ ...prev, height: Number(e.target.value) }))}
+                     style={{ width: "100%", padding: "2px", fontSize: "10px" }}
+                   />
+                 </div>
+               </div>
+               
+               {/* 预设按钮 */}
+               <div style={{ marginTop: 8, display: "flex", gap: 4, flexWrap: "wrap" }}>
+                 <button
+                   onClick={() => setCustomRecordingBounds({ x: 0, y: 0, width: 800, height: 600 })}
+                   style={{ fontSize: "9px", padding: "2px 4px", background: "#444", color: "white", border: "none", borderRadius: "2px", cursor: "pointer" }}
+                 >
+                   800×600
+                 </button>
+                 <button
+                   onClick={() => setCustomRecordingBounds({ x: 0, y: 0, width: 1920, height: 1080 })}
+                   style={{ fontSize: "9px", padding: "2px 4px", background: "#444", color: "white", border: "none", borderRadius: "2px", cursor: "pointer" }}
+                 >
+                   1920×1080
+                 </button>
+                 <button
+                   onClick={() => setCustomRecordingBounds({ x: 0, y: 0, width: 1280, height: 720 })}
+                   style={{ fontSize: "9px", padding: "2px 4px", background: "#444", color: "white", border: "none", borderRadius: "2px", cursor: "pointer" }}
+                 >
+                   1280×720
+                 </button>
+               </div>
+               
+               {/* 重置为模型边框按钮 */}
+               <button
+                 onClick={() => {
+                   if (modelRef.current) {
+                     if (Array.isArray(modelRef.current)) {
+                       // 复合模型
+                       if (groupContainerRef.current) {
+                         const b = groupContainerRef.current.getBounds();
+                         setCustomRecordingBounds({
+                           x: Math.max(0, b.x),
+                           y: Math.max(0, b.y),
+                           width: Math.min(b.width, window.innerWidth),
+                           height: Math.min(b.height, window.innerHeight),
+                         });
+                       }
+                     } else {
+                       // 单模型
+                       const model = modelRef.current;
+                       const modelWidth = model.width * model.scale.x;
+                       const modelHeight = model.height * model.scale.y;
+                       const modelX = model.position.x - modelWidth / 2;
+                       const modelY = model.position.y - modelHeight / 2;
+                       setCustomRecordingBounds({
+                         x: Math.max(0, modelX),
+                         y: Math.max(0, modelY),
+                         width: Math.min(modelWidth, window.innerWidth),
+                         height: Math.min(modelHeight, window.innerHeight),
+                       });
+                     }
+                   }
+                 }}
+                 style={{ 
+                   fontSize: "9px", 
+                   padding: "4px 8px", 
+                   background: "#6b35ff", 
+                   color: "white", 
+                   border: "none", 
+                   borderRadius: "4px", 
+                   cursor: "pointer",
+                   marginTop: 8,
+                   width: "100%"
+                 }}
+               >
+                 重置为模型边框
+               </button>
+             </div>
+           </>
+         )}
+        
+                 {/* 录制质量设置 */}
+         <div style={{ fontSize: "11px" }}>
+           <div style={{ marginBottom: 4 }}>录制质量:</div>
+           <div style={{ display: "flex", gap: 4 }}>
+             <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "10px" }}>
+               <input
+                 type="radio"
+                 name="quality"
+                 value="low"
+                 checked={recordingQuality === "low"}
+                 onChange={(e) => setRecordingQuality(e.target.value as "low" | "medium" | "high")}
+                 style={{ width: 12, height: 12 }}
+               />
+               低 (24fps)
+             </label>
+             <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "10px" }}>
+               <input
+                 type="radio"
+                 name="quality"
+                 value="medium"
+                 checked={recordingQuality === "medium"}
+                 onChange={(e) => setRecordingQuality(e.target.value as "low" | "medium" | "high")}
+                 style={{ width: 12, height: 12 }}
+               />
+               中 (30fps)
+             </label>
+             <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "10px" }}>
+               <input
+                 type="radio"
+                 name="quality"
+                 value="high"
+                 checked={recordingQuality === "high"}
+                 onChange={(e) => setRecordingQuality(e.target.value as "low" | "medium" | "high")}
+                 style={{ width: 12, height: 12 }}
+               />
+               高 (60fps)
+             </label>
+           </div>
+         </div>
+         
+         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+           <input
+             type="checkbox"
+             id="transparentBg"
+             checked={transparentBg}
+             onChange={(e) => setTransparentBg(e.target.checked)}
+             style={{ width: 16, height: 16 }}
+           />
+           <label htmlFor="transparentBg" style={{ fontSize: "12px" }}>
+             透明背景
+           </label>
+         </div>
 
         {recState !== "rec" ? (
           <button

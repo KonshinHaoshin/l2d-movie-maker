@@ -231,8 +231,9 @@ export default function Timeline({
                                         top: (TRACK_H - CLIP_H) / 2,
                                         background: color,
                                         cursor: 'pointer',
-                                        position: 'relative',
+                                        position: 'absolute',
                                         overflow: 'hidden',
+                                        zIndex: 10,
                                     }}
                                     onMouseDown={(e) => {
                                         // 排除点到把手
