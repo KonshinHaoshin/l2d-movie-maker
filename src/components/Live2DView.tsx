@@ -1167,556 +1167,456 @@ export default function Live2DView() {
     }
   };
 
-  return (
+ return (
     <div className="live2d-container">
       <canvas
-        ref={canvasRef}
-        style={{ background: "transparent", display: "block" }}
-        data-transparent="true"
+          ref={canvasRef}
+          className="live2d-canvas"
+          data-transparent="true"
       />
-      
-             {/* 录制区域边框 */}
-       {showRecordingBounds && (
-         <div
-           style={{
-             position: "absolute",
-             left: customRecordingBounds.x,
-             top: customRecordingBounds.y,
-             width: customRecordingBounds.width,
-             height: customRecordingBounds.height,
-             border: "2px solid #000000",
-             pointerEvents: "auto",
-             zIndex: 999,
-             boxShadow: "0 0 10px rgba(0,0,0,0.5)",
-             cursor: "move"
-           }}
-           onMouseDown={(e) => {
-             e.preventDefault();
-             const startX = e.clientX;
-             const startY = e.clientY;
-             const startBounds = { ...customRecordingBounds };
-             
-             const handleMouseMove = (moveEvent: MouseEvent) => {
-               const deltaX = moveEvent.clientX - startX;
-               const deltaY = moveEvent.clientY - startY;
-               
-               setCustomRecordingBounds({
-                 x: Math.max(0, startBounds.x + deltaX),
-                 y: Math.max(0, startBounds.y + deltaY),
-                 width: startBounds.width,
-                 height: startBounds.height
-               });
-             };
-             
-             const handleMouseUp = () => {
-               document.removeEventListener('mousemove', handleMouseMove);
-               document.removeEventListener('mouseup', handleMouseUp);
-             };
-             
-             document.addEventListener('mousemove', handleMouseMove);
-             document.addEventListener('mouseup', handleMouseUp);
-           }}
-         >
-           {/* 调整大小的手柄 */}
-           <div
-             style={{
-               position: "absolute",
-               right: -5,
-               bottom: -5,
-               width: 10,
-               height: 10,
-               background: "#000000",
-               border: "1px solid #ffffff",
-               cursor: "nw-resize"
-             }}
-             onMouseDown={(e) => {
-               e.stopPropagation();
-               const startX = e.clientX;
-               const startY = e.clientY;
-               const startBounds = { ...customRecordingBounds };
-               
-               const handleMouseMove = (moveEvent: MouseEvent) => {
-                 const deltaX = moveEvent.clientX - startX;
-                 const deltaY = moveEvent.clientY - startY;
-                 
-                 const newWidth = Math.max(100, startBounds.width + deltaX);
-                 const newHeight = Math.max(100, startBounds.height + deltaY);
-                 
-                 setCustomRecordingBounds({
-                   x: startBounds.x,
-                   y: startBounds.y,
-                   width: newWidth,
-                   height: newHeight
-                 });
-               };
-               
-               const handleMouseUp = () => {
-                 document.removeEventListener('mousemove', handleMouseMove);
-                 document.removeEventListener('mouseup', handleMouseUp);
-               };
-               
-               document.addEventListener('mousemove', handleMouseMove);
-               document.addEventListener('mouseup', handleMouseUp);
-             }}
-           />
-           
-           {/* 调整宽度的右侧手柄 */}
-           <div
-             style={{
-               position: "absolute",
-               right: -5,
-               top: "50%",
-               transform: "translateY(-50%)",
-               width: 10,
-               height: 20,
-               background: "#000000",
-               border: "1px solid #ffffff",
-               cursor: "ew-resize"
-             }}
-             onMouseDown={(e) => {
-               e.stopPropagation();
-               const startX = e.clientX;
-               const startBounds = { ...customRecordingBounds };
-               
-               const handleMouseMove = (moveEvent: MouseEvent) => {
-                 const deltaX = moveEvent.clientX - startX;
-                 const newWidth = Math.max(100, startBounds.width + deltaX);
-                 
-                 setCustomRecordingBounds({
-                   ...startBounds,
-                   width: newWidth
-                 });
-               };
-               
-               const handleMouseUp = () => {
-                 document.removeEventListener('mousemove', handleMouseMove);
-                 document.removeEventListener('mouseup', handleMouseUp);
-               };
-               
-               document.addEventListener('mousemove', handleMouseMove);
-               document.addEventListener('mouseup', handleMouseUp);
-             }}
-           />
-           
-           {/* 调整高度的底部手柄 */}
-           <div
-             style={{
-               position: "absolute",
-               left: "50%",
-               bottom: -5,
-               transform: "translateX(-50%)",
-               width: 20,
-               height: 10,
-               background: "#000000",
-               border: "1px solid #ffffff",
-               cursor: "ns-resize"
-             }}
-             onMouseDown={(e) => {
-               e.stopPropagation();
-               const startY = e.clientY;
-               const startBounds = { ...customRecordingBounds };
-               
-               const handleMouseMove = (moveEvent: MouseEvent) => {
-                 const deltaY = moveEvent.clientY - startY;
-                 const newHeight = Math.max(100, startBounds.height + deltaY);
-                 
-                 setCustomRecordingBounds({
-                   ...startBounds,
-                   height: newHeight
-                 });
-               };
-               
-               const handleMouseUp = () => {
-                 document.removeEventListener('mousemove', handleMouseMove);
-                 document.removeEventListener('mouseup', handleMouseUp);
-               };
-               
-               document.addEventListener('mousemove', handleMouseMove);
-               document.addEventListener('mouseup', handleMouseUp);
-             }}
-           />
-         </div>
-       )}
+
+      {/* 录制区域边框 */}
+      {showRecordingBounds && (
+          <div
+              className="recording-bounds"
+              style={{
+                left: customRecordingBounds.x,
+                top: customRecordingBounds.y,
+                width: customRecordingBounds.width,
+                height: customRecordingBounds.height
+              }}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                const startX = e.clientX;
+                const startY = e.clientY;
+                const startBounds = { ...customRecordingBounds };
+
+                const handleMouseMove = (moveEvent: MouseEvent) => {
+                  const deltaX = moveEvent.clientX - startX;
+                  const deltaY = moveEvent.clientY - startY;
+
+                  setCustomRecordingBounds({
+                    x: Math.max(0, startBounds.x + deltaX),
+                    y: Math.max(0, startBounds.y + deltaY),
+                    width: startBounds.width,
+                    height: startBounds.height
+                  });
+                };
+
+                const handleMouseUp = () => {
+                  document.removeEventListener('mousemove', handleMouseMove);
+                  document.removeEventListener('mouseup', handleMouseUp);
+                };
+
+                document.addEventListener('mousemove', handleMouseMove);
+                document.addEventListener('mouseup', handleMouseUp);
+              }}
+          >
+            {/* 调整大小的手柄 */}
+            <div
+                className="resize-handle resize-handle--corner"
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  const startX = e.clientX;
+                  const startY = e.clientY;
+                  const startBounds = { ...customRecordingBounds };
+
+                  const handleMouseMove = (moveEvent: MouseEvent) => {
+                    const deltaX = moveEvent.clientX - startX;
+                    const deltaY = moveEvent.clientY - startY;
+
+                    const newWidth = Math.max(100, startBounds.width + deltaX);
+                    const newHeight = Math.max(100, startBounds.height + deltaY);
+
+                    setCustomRecordingBounds({
+                      x: startBounds.x,
+                      y: startBounds.y,
+                      width: newWidth,
+                      height: newHeight
+                    });
+                  };
+
+                  const handleMouseUp = () => {
+                    document.removeEventListener('mousemove', handleMouseMove);
+                    document.removeEventListener('mouseup', handleMouseUp);
+                  };
+
+                  document.addEventListener('mousemove', handleMouseMove);
+                  document.addEventListener('mouseup', handleMouseUp);
+                }}
+            />
+
+            {/* 调整宽度的右侧手柄 */}
+            <div
+                className="resize-handle resize-handle--right"
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  const startX = e.clientX;
+                  const startBounds = { ...customRecordingBounds };
+
+                  const handleMouseMove = (moveEvent: MouseEvent) => {
+                    const deltaX = moveEvent.clientX - startX;
+                    const newWidth = Math.max(100, startBounds.width + deltaX);
+
+                    setCustomRecordingBounds({
+                      ...startBounds,
+                      width: newWidth
+                    });
+                  };
+
+                  const handleMouseUp = () => {
+                    document.removeEventListener('mousemove', handleMouseMove);
+                    document.removeEventListener('mouseup', handleMouseUp);
+                  };
+
+                  document.addEventListener('mousemove', handleMouseMove);
+                  document.addEventListener('mouseup', handleMouseUp);
+                }}
+            />
+
+            {/* 调整高度的底部手柄 */}
+            <div
+                className="resize-handle resize-handle--bottom"
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  const startY = e.clientY;
+                  const startBounds = { ...customRecordingBounds };
+
+                  const handleMouseMove = (moveEvent: MouseEvent) => {
+                    const deltaY = moveEvent.clientY - startY;
+                    const newHeight = Math.max(100, startBounds.height + deltaY);
+
+                    setCustomRecordingBounds({
+                      ...startBounds,
+                      height: newHeight
+                    });
+                  };
+
+                  const handleMouseUp = () => {
+                    document.removeEventListener('mousemove', handleMouseMove);
+                    document.removeEventListener('mouseup', handleMouseUp);
+                  };
+
+                  document.addEventListener('mousemove', handleMouseMove);
+                  document.addEventListener('mouseup', handleMouseUp);
+                }}
+            />
+          </div>
+      )}
 
       {/* 控制面板 */}
       {showControls && (
-        <ControlPanel
-          onClose={() => setShowControls(false)}
+          <ControlPanel
+              onClose={() => setShowControls(false)}
 
-          // 模型选择
-          modelList={modelList}
-          selectedModel={selectedModel}
-          onSelectModel={(rel) => setSelectedModel(rel || null)}
-          onRefreshModels={refreshModels}
+              // 模型选择
+              modelList={modelList}
+              selectedModel={selectedModel}
+              onSelectModel={(rel) => setSelectedModel(rel || null)}
+              onRefreshModels={refreshModels}
 
-          modelData={modelData}
-          motionLen={motionLen}
-          currentMotion={currentMotion}
-          currentExpression={currentExpression}
-          motionDur={motionDur}
-          exprDur={exprDur}
-          setMotionDur={setMotionDur}
-          setExprDur={setExprDur}
-          chooseMotion={(name) => { playMotion(name); setCurrentMotion(name); }}
-          chooseExpression={(name) => { applyExpression(name); setCurrentExpression(name); }}
-          addMotionClip={addMotionClip}
-          addExprClip={addExprClip}
-          addAudioClip={addAudioClip}
+              modelData={modelData}
+              motionLen={motionLen}
+              currentMotion={currentMotion}
+              currentExpression={currentExpression}
+              motionDur={motionDur}
+              exprDur={exprDur}
+              setMotionDur={setMotionDur}
+              setExprDur={setExprDur}
+              chooseMotion={(name) => { playMotion(name); setCurrentMotion(name); }}
+              chooseExpression={(name) => { applyExpression(name); setCurrentExpression(name); }}
+              addMotionClip={addMotionClip}
+              addExprClip={addExprClip}
+              addAudioClip={addAudioClip}
 
-          enableDragging={enableDragging}
-          setEnableDragging={setEnableDragging}
-          isDragging={isDragging}
-          timelineLength={Math.max(
-            motionClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
-            exprClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
-            audioClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0)
-          )}
-          playhead={playhead}
-          isPlaying={isPlaying}
-          startPlayback={startPlayback}
-          stopPlayback={stopPlayback}
-          clearTimeline={clearTimeline}
-          onChangeClip={changeClip}
-          onSetPlayhead={setPlayheadSec}
-          currentAudioLevel={currentAudioLevel}
-          
+              enableDragging={enableDragging}
+              setEnableDragging={setEnableDragging}
+              isDragging={isDragging}
+              timelineLength={Math.max(
+                  motionClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
+                  exprClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
+                  audioClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0)
+              )}
+              playhead={playhead}
+              isPlaying={isPlaying}
+              startPlayback={startPlayback}
+              stopPlayback={stopPlayback}
+              clearTimeline={clearTimeline}
+              onChangeClip={changeClip}
+              onSetPlayhead={setPlayheadSec}
+              currentAudioLevel={currentAudioLevel}
 
-        />
+
+          />
       )}
 
       {/* 时间线 */}
       <Timeline
-        motionClips={motionClips}
-        exprClips={exprClips}
-        audioClips={audioClips}
-        playheadSec={playhead}
-        onChangeClip={changeClip}
-        onRemoveClip={(track, id) => {
-          if (track === "motion") setMotionClips(prev => prev.filter(c => c.id !== id));
-          else if (track === "expr") setExprClips(prev => prev.filter(c => c.id !== id));
-          else if (track === "audio") {
-            setAudioClips(prev => prev.filter(c => c.id !== id));
-            // 清理音频引用
-            const audio = audioRefs.current.get(id);
-            if (audio) {
-              audio.pause();
-              audio.src = '';
-              audioRefs.current.delete(id);
+          motionClips={motionClips}
+          exprClips={exprClips}
+          audioClips={audioClips}
+          playheadSec={playhead}
+          onChangeClip={changeClip}
+          onRemoveClip={(track, id) => {
+            if (track === "motion") setMotionClips(prev => prev.filter(c => c.id !== id));
+            else if (track === "expr") setExprClips(prev => prev.filter(c => c.id !== id));
+            else if (track === "audio") {
+              setAudioClips(prev => prev.filter(c => c.id !== id));
+              // 清理音频引用
+              const audio = audioRefs.current.get(id);
+              if (audio) {
+                audio.pause();
+                audio.src = '';
+                audioRefs.current.delete(id);
+              }
+              // 清理音频分析器
+              const analyzerData = audioAnalyzersRef.current.get(id);
+              if (analyzerData) {
+                try {
+                  analyzerData.source.disconnect();
+                  analyzerData.analyzer.disconnect();
+                } catch {}
+                audioAnalyzersRef.current.delete(id);
+              }
             }
-            // 清理音频分析器
-            const analyzerData = audioAnalyzersRef.current.get(id);
-            if (analyzerData) {
-              try {
-                analyzerData.source.disconnect();
-                analyzerData.analyzer.disconnect();
-              } catch {}
-              audioAnalyzersRef.current.delete(id);
-            }
-          }
-        }}
-        onSetPlayhead={setPlayheadSec}
-        onStartPlayback={startPlayback}
-        onStopPlayback={stopPlayback}
-        isPlaying={isPlaying}
+          }}
+          onSetPlayhead={setPlayheadSec}
+          onStartPlayback={startPlayback}
+          onStopPlayback={stopPlayback}
+          isPlaying={isPlaying}
       />
 
       {/* 导出工具条（右下角） */}
-      <div
-        className="export-toolbar"
-        style={{
-          position: "absolute",
-          right: 16,
-          bottom: 160,
-          zIndex: 1000,
-          background: "rgba(0,0,0,.85)",
-          color: "#fff",
-          padding: 12,
-          borderRadius: 10,
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-          alignItems: "stretch",
-          minWidth: "200px",
-          pointerEvents: "auto",
-        }}
-      >
-                 {/* 录制范围设置 */}
-         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-           <input
-             type="checkbox"
-             id="showRecordingBounds"
-             checked={showRecordingBounds}
-             onChange={(e) => setShowRecordingBounds(e.target.checked)}
-             style={{ width: 16, height: 16 }}
-           />
-           <label htmlFor="showRecordingBounds" style={{ fontSize: "12px" }}>
-             显示录制区域边框
-           </label>
-         </div>
-         
-         {showRecordingBounds && (
-           <>
-             <div style={{ fontSize: "11px", color: "#ccc" }}>
-               录制区域: {customRecordingBounds.width.toFixed(0)} × {customRecordingBounds.height.toFixed(0)} px
-               <br />
-               位置: ({customRecordingBounds.x.toFixed(0)}, {customRecordingBounds.y.toFixed(0)})
-             </div>
-             
-             {/* 录制范围调整控件 */}
-             <div style={{ fontSize: "11px", marginTop: 8 }}>
-               <div style={{ marginBottom: 4 }}>调整录制范围:</div>
-               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, fontSize: "10px" }}>
-                 <div>
-                   <label>X:</label>
-                   <input
-                     type="number"
-                     value={customRecordingBounds.x}
-                     onChange={(e) => setCustomRecordingBounds(prev => ({ ...prev, x: Number(e.target.value) }))}
-                     style={{ width: "100%", padding: "2px", fontSize: "10px" }}
-                   />
-                 </div>
-                 <div>
-                   <label>Y:</label>
-                   <input
-                     type="number"
-                     value={customRecordingBounds.y}
-                     onChange={(e) => setCustomRecordingBounds(prev => ({ ...prev, y: Number(e.target.value) }))}
-                     style={{ width: "100%", padding: "2px", fontSize: "10px" }}
-                   />
-                 </div>
-                 <div>
-                   <label>宽度:</label>
-                   <input
-                     type="number"
-                     value={customRecordingBounds.width}
-                     onChange={(e) => setCustomRecordingBounds(prev => ({ ...prev, width: Number(e.target.value) }))}
-                     style={{ width: "100%", padding: "2px", fontSize: "10px" }}
-                   />
-                 </div>
-                 <div>
-                   <label>高度:</label>
-                   <input
-                     type="number"
-                     value={customRecordingBounds.height}
-                     onChange={(e) => setCustomRecordingBounds(prev => ({ ...prev, height: Number(e.target.value) }))}
-                     style={{ width: "100%", padding: "2px", fontSize: "10px" }}
-                   />
-                 </div>
-               </div>
-               
-               {/* 预设按钮 */}
-               <div style={{ marginTop: 8, display: "flex", gap: 4, flexWrap: "wrap" }}>
-                 <button
-                   onClick={() => setCustomRecordingBounds({ x: 0, y: 0, width: 800, height: 600 })}
-                   style={{ fontSize: "9px", padding: "2px 4px", background: "#444", color: "white", border: "none", borderRadius: "2px", cursor: "pointer" }}
-                 >
-                   800×600
-                 </button>
-                 <button
-                   onClick={() => setCustomRecordingBounds({ x: 0, y: 0, width: 1920, height: 1080 })}
-                   style={{ fontSize: "9px", padding: "2px 4px", background: "#444", color: "white", border: "none", borderRadius: "2px", cursor: "pointer" }}
-                 >
-                   1920×1080
-                 </button>
-                 <button
-                   onClick={() => setCustomRecordingBounds({ x: 0, y: 0, width: 1280, height: 720 })}
-                   style={{ fontSize: "9px", padding: "2px 4px", background: "#444", color: "white", border: "none", borderRadius: "2px", cursor: "pointer" }}
-                 >
-                   1280×720
-                 </button>
-               </div>
-               
-               {/* 重置为模型边框按钮 */}
-               <button
-                 onClick={() => {
-                   if (modelRef.current) {
-                     if (Array.isArray(modelRef.current)) {
-                       // 复合模型
-                       if (groupContainerRef.current) {
-                         const b = groupContainerRef.current.getBounds();
-                         setCustomRecordingBounds({
-                           x: Math.max(0, b.x),
-                           y: Math.max(0, b.y),
-                           width: Math.min(b.width, window.innerWidth),
-                           height: Math.min(b.height, window.innerHeight),
-                         });
-                       }
-                     } else {
-                       // 单模型
-                       const model = modelRef.current;
-                       const modelWidth = model.width * model.scale.x;
-                       const modelHeight = model.height * model.scale.y;
-                       const modelX = model.position.x - modelWidth / 2;
-                       const modelY = model.position.y - modelHeight / 2;
-                       setCustomRecordingBounds({
-                         x: Math.max(0, modelX),
-                         y: Math.max(0, modelY),
-                         width: Math.min(modelWidth, window.innerWidth),
-                         height: Math.min(modelHeight, window.innerHeight),
-                       });
-                     }
-                   }
-                 }}
-                 style={{ 
-                   fontSize: "9px", 
-                   padding: "4px 8px", 
-                   background: "#6b35ff", 
-                   color: "white", 
-                   border: "none", 
-                   borderRadius: "4px", 
-                   cursor: "pointer",
-                   marginTop: 8,
-                   width: "100%"
-                 }}
-               >
-                 重置为模型边框
-               </button>
-             </div>
-           </>
-         )}
-        
-                 {/* 录制质量设置 */}
-         <div style={{ fontSize: "11px" }}>
-           <div style={{ marginBottom: 4 }}>录制质量:</div>
-           <div style={{ display: "flex", gap: 4 }}>
-             <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "10px" }}>
-               <input
-                 type="radio"
-                 name="quality"
-                 value="low"
-                 checked={recordingQuality === "low"}
-                 onChange={(e) => setRecordingQuality(e.target.value as "low" | "medium" | "high")}
-                 style={{ width: 12, height: 12 }}
-               />
-               低 (24fps)
-             </label>
-             <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "10px" }}>
-               <input
-                 type="radio"
-                 name="quality"
-                 value="medium"
-                 checked={recordingQuality === "medium"}
-                 onChange={(e) => setRecordingQuality(e.target.value as "low" | "medium" | "high")}
-                 style={{ width: 12, height: 12 }}
-               />
-               中 (30fps)
-             </label>
-             <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "10px" }}>
-               <input
-                 type="radio"
-                 name="quality"
-                 value="high"
-                 checked={recordingQuality === "high"}
-                 onChange={(e) => setRecordingQuality(e.target.value as "low" | "medium" | "high")}
-                 style={{ width: 12, height: 12 }}
-               />
-               高 (60fps)
-             </label>
-           </div>
-         </div>
-         
-         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-           <input
-             type="checkbox"
-             id="transparentBg"
-             checked={transparentBg}
-             onChange={(e) => setTransparentBg(e.target.checked)}
-             style={{ width: 16, height: 16 }}
-           />
-           <label htmlFor="transparentBg" style={{ fontSize: "12px" }}>
-             透明背景
-           </label>
-         </div>
+      <div className="export-toolbar">
+        {/* 录制范围设置 */}
+        <div className="recording-bounds-settings">
+          <input
+              type="checkbox"
+              id="showRecordingBounds"
+              checked={showRecordingBounds}
+              onChange={(e) => setShowRecordingBounds(e.target.checked)}
+              className="recording-bounds-checkbox"
+          />
+          <label htmlFor="showRecordingBounds" className="recording-bounds-label">
+            显示录制区域边框
+          </label>
+        </div>
+
+        {showRecordingBounds && (
+            <>
+              <div className="recording-bounds-info">
+                录制区域: {customRecordingBounds.width.toFixed(0)} × {customRecordingBounds.height.toFixed(0)} px
+                <br />
+                位置: ({customRecordingBounds.x.toFixed(0)}, {customRecordingBounds.y.toFixed(0)})
+              </div>
+
+              {/* 录制范围调整控件 */}
+              <div className="recording-bounds-controls">
+                <div className="recording-bounds-controls-title">调整录制范围:</div>
+                <div className="recording-bounds-grid">
+                  <div className="recording-bounds-input-group">
+                    <label>X:</label>
+                    <input
+                        type="number"
+                        value={customRecordingBounds.x}
+                        onChange={(e) => setCustomRecordingBounds(prev => ({ ...prev, x: Number(e.target.value) }))}
+                        className="recording-bounds-input"
+                    />
+                  </div>
+                  <div className="recording-bounds-input-group">
+                    <label>Y:</label>
+                    <input
+                        type="number"
+                        value={customRecordingBounds.y}
+                        onChange={(e) => setCustomRecordingBounds(prev => ({ ...prev, y: Number(e.target.value) }))}
+                        className="recording-bounds-input"
+                    />
+                  </div>
+                  <div className="recording-bounds-input-group">
+                    <label>宽度:</label>
+                    <input
+                        type="number"
+                        value={customRecordingBounds.width}
+                        onChange={(e) => setCustomRecordingBounds(prev => ({ ...prev, width: Number(e.target.value) }))}
+                        className="recording-bounds-input"
+                    />
+                  </div>
+                  <div className="recording-bounds-input-group">
+                    <label>高度:</label>
+                    <input
+                        type="number"
+                        value={customRecordingBounds.height}
+                        onChange={(e) => setCustomRecordingBounds(prev => ({ ...prev, height: Number(e.target.value) }))}
+                        className="recording-bounds-input"
+                    />
+                  </div>
+                </div>
+
+                {/* 预设按钮 */}
+                <div className="preset-buttons">
+                  <button
+                      onClick={() => setCustomRecordingBounds({ x: 0, y: 0, width: 800, height: 600 })}
+                      className="preset-button"
+                  >
+                    800×600
+                  </button>
+                  <button
+                      onClick={() => setCustomRecordingBounds({ x: 0, y: 0, width: 1920, height: 1080 })}
+                      className="preset-button"
+                  >
+                    1920×1080
+                  </button>
+                  <button
+                      onClick={() => setCustomRecordingBounds({ x: 0, y: 0, width: 1280, height: 720 })}
+                      className="preset-button"
+                  >
+                    1280×720
+                  </button>
+                </div>
+
+                {/* 重置为模型边框按钮 */}
+                <button
+                    onClick={() => {
+                      if (modelRef.current) {
+                        if (Array.isArray(modelRef.current)) {
+                          // 复合模型
+                          if (groupContainerRef.current) {
+                            const b = groupContainerRef.current.getBounds();
+                            setCustomRecordingBounds({
+                              x: Math.max(0, b.x),
+                              y: Math.max(0, b.y),
+                              width: Math.min(b.width, window.innerWidth),
+                              height: Math.min(b.height, window.innerHeight),
+                            });
+                          }
+                        } else {
+                          // 单模型
+                          const model = modelRef.current;
+                          const modelWidth = model.width * model.scale.x;
+                          const modelHeight = model.height * model.scale.y;
+                          const modelX = model.position.x - modelWidth / 2;
+                          const modelY = model.position.y - modelHeight / 2;
+                          setCustomRecordingBounds({
+                            x: Math.max(0, modelX),
+                            y: Math.max(0, modelY),
+                            width: Math.min(modelWidth, window.innerWidth),
+                            height: Math.min(modelHeight, window.innerHeight),
+                          });
+                        }
+                      }
+                    }}
+                    className="reset-button"
+                >
+                  重置为模型边框
+                </button>
+              </div>
+            </>
+        )}
+
+        {/* 录制质量设置 */}
+        <div className="recording-quality-section">
+          <div className="recording-quality-title">录制质量:</div>
+          <div className="recording-quality-options">
+            <label className="recording-quality-option">
+              <input
+                  type="radio"
+                  name="quality"
+                  value="low"
+                  checked={recordingQuality === "low"}
+                  onChange={(e) => setRecordingQuality(e.target.value as "low" | "medium" | "high")}
+                  className="recording-quality-radio"
+              />
+              低 (24fps)
+            </label>
+            <label className="recording-quality-option">
+              <input
+                  type="radio"
+                  name="quality"
+                  value="medium"
+                  checked={recordingQuality === "medium"}
+                  onChange={(e) => setRecordingQuality(e.target.value as "low" | "medium" | "high")}
+                  className="recording-quality-radio"
+              />
+              中 (30fps)
+            </label>
+            <label className="recording-quality-option">
+              <input
+                  type="radio"
+                  name="quality"
+                  value="high"
+                  checked={recordingQuality === "high"}
+                  onChange={(e) => setRecordingQuality(e.target.value as "low" | "medium" | "high")}
+                  className="recording-quality-radio"
+              />
+              高 (60fps)
+            </label>
+          </div>
+        </div>
+
+        <div className="recording-bounds-settings">
+          <input
+              type="checkbox"
+              id="transparentBg"
+              checked={transparentBg}
+              onChange={(e) => setTransparentBg(e.target.checked)}
+              className="transparent-bg-checkbox"
+          />
+          <label htmlFor="transparentBg" className="transparent-bg-label">
+            透明背景
+          </label>
+        </div>
 
         {recState !== "rec" ? (
-          <button
-            onClick={start}
-            disabled={!isVp9AlphaSupported()}
-            style={{
-              background: "#28a745",
-              color: "#fff",
-              border: "none",
-              padding: "8px 12px",
-              borderRadius: "4px",
-              cursor: "pointer"
-            }}
-          >
-            ⬤ 开始录制（VP9 透明）
-          </button>
+            <button
+                onClick={start}
+                disabled={!isVp9AlphaSupported()}
+                className="record-button"
+            >
+              ⬤ 开始录制（VP9 透明）
+            </button>
         ) : (
-          <button
-            onClick={stop}
-            style={{
-              background: "#ff6b6b",
-              color: "#fff",
-              border: "none",
-              padding: "8px 12px",
-              borderRadius: "4px",
-              cursor: "pointer"
-            }}
-          >
-            ■ 停止录制
-          </button>
+            <button
+                onClick={stop}
+                className="stop-button"
+            >
+              ■ 停止录制
+            </button>
         )}
 
         {recState === "rec" && (
-          <div style={{ fontSize: "12px", textAlign: "center" }}>
-            <div>录制中... {recordingTime.toFixed(1)}s</div>
-            <div style={{
-              width: "100%",
-              height: "4px",
-              background: "#444",
-              borderRadius: "2px",
-              overflow: "hidden"
-            }}>
-              <div style={{
-                width: `${recordingProgress}%`,
-                height: "100%",
-                background: "#28a745",
-                transition: "width 0.1s"
-              }} />
+            <div className="recording-progress">
+              <div>录制中... {recordingTime.toFixed(1)}s</div>
+              <div className="recording-progress-bar">
+                <div 
+                  className="recording-progress-fill"
+                  style={{ width: `${recordingProgress}%` }}
+                />
+              </div>
             </div>
-          </div>
         )}
 
         <button
-          onClick={saveWebM}
-          disabled={!blob}
-          style={{
-            background: blob ? "#007bff" : "#6c757d",
-            color: "#fff",
-            border: "none",
-            padding: "6px 12px",
-            borderRadius: "4px",
-            cursor: blob ? "pointer" : "not-allowed",
-            fontSize: "12px"
-          }}
+            onClick={saveWebM}
+            disabled={!blob}
+            className="download-button"
         >
           下载 WebM（透明）
         </button>
 
         <button
-          onClick={toMov}
-          disabled={!blob}
-          style={{
-            background: blob ? "#6f42c1" : "#6c757d",
-            color: "#fff",
-            border: "none",
-            padding: "6px 12px",
-            borderRadius: "4px",
-            cursor: blob ? "pointer" : "not-allowed",
-            fontSize: "12px"
-          }}
+            onClick={toMov}
+            disabled={!blob}
+            className="convert-button"
         >
           转 MOV（ProRes 4444）
         </button>
       </div>
 
       {!showControls && (
-        <button className="l2d-toggle" onClick={() => setShowControls(true)}>
-          🎛️ 显示控制面板
-        </button>
+          <button className="l2d-toggle" onClick={() => setShowControls(true)}>
+            🎛️ 显示控制面板
+          </button>
       )}
     </div>
-  );
+);
 }
