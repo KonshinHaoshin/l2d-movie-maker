@@ -38,6 +38,8 @@ type Props = {
   addMotionClip: (name: string) => void;
   addExprClip: (name: string) => void;
   addAudioClip: () => void; // 新增音频导入功能
+  debugModelParameters?: () => void; // 调试模型参数
+  currentAudioLevel?: number; // 当前音频电平
 
   // 拖拽
   enableDragging: boolean;
@@ -342,6 +344,16 @@ const ControlPanel: React.FC<Props> = (props) => {
           >
             🎵 导入音频
           </button>
+          {props.debugModelParameters && (
+            <button 
+              className="btn" 
+              onClick={props.debugModelParameters}
+              style={{ background: '#6b35ff', color: 'white' }}
+              title="调试模型参数，查看控制台输出"
+            >
+              🔍 调试参数
+            </button>
+          )}
         </div>
         
         {/* 音频控制提示 */}
@@ -352,6 +364,42 @@ const ControlPanel: React.FC<Props> = (props) => {
           • 音频文件格式支持（MP3、WAV、OGG等）<br />
           • 如果听不到声音，请检查音频文件是否正常
         </div>
+        
+        {/* 音频电平显示 */}
+        {props.currentAudioLevel !== undefined && (
+          <div style={{ marginTop: 8, padding: 8, background: 'rgba(107,53,255,0.1)', borderRadius: 4, fontSize: 11 }}>
+            🎵 <strong>实时音频电平：</strong><br />
+            <div style={{ 
+              width: '100%', 
+              height: '20px', 
+              background: '#333', 
+              borderRadius: '10px', 
+              overflow: 'hidden',
+              position: 'relative'
+            }}>
+              <div style={{
+                width: `${props.currentAudioLevel}%`,
+                height: '100%',
+                background: `linear-gradient(90deg, #4CAF50, #FF9800, #F44336)`,
+                transition: 'width 0.1s ease',
+                borderRadius: '10px'
+              }} />
+              <div style={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                color: 'white',
+                fontSize: '10px',
+                fontWeight: 'bold',
+                textShadow: '1px 1px 2px rgba(0,0,0,0.8)'
+              }}>
+                {props.currentAudioLevel.toFixed(1)}%
+              </div>
+            </div>
+            {props.currentAudioLevel > 5 ? '🎤 嘴型动画激活中' : '🔇 等待音频输入'}
+          </div>
+        )}
       </div>
 
       {/* 录制设置 */}
