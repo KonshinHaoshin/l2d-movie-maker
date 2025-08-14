@@ -4,6 +4,7 @@ import type { Clip, TrackKind } from "./types";
 type Props = {
     motionClips: Clip[];
     exprClips: Clip[];
+    audioClips: Clip[]; // 新增音频轨
     playheadSec: number;
 
     // 可控/不可控 zoom：传入就受控，不传则内部自己管
@@ -30,9 +31,9 @@ type Props = {
 // —— UI 常量 —— //
 const MIN_CLIP_SEC = 0.1;
 const GRID_STEP_SEC = 0.1; // 吸附粒度（0.1s）
-const DEFAULT_PPS = 80; // 默认像素/秒（比120更“合理”，6-7s 也不会太长）
-const TRACK_H = 56;
-const CLIP_H = 40;
+const DEFAULT_PPS = 80; // 默认像素/秒（比120更"合理"，6-7s 也不会太长）
+const TRACK_H = 40; // 减少轨道高度
+const CLIP_H = 32; // 减少片段高度
 const HANDLE_W = 8;
 
 type DragKind =
@@ -51,6 +52,7 @@ type DragKind =
 export default function Timeline({
                                      motionClips,
                                      exprClips,
+                                     audioClips, // 新增音频轨
                                      playheadSec,
                                      pixelsPerSec,
                                      onChangePixelsPerSec,
@@ -74,15 +76,16 @@ export default function Timeline({
         onChangePixelsPerSec ? onChangePixelsPerSec(next) : setInternalPps(next);
     };
 
-    // 时间线总时长：取两条轨的最大结束时间
+    // 时间线总时长：取三条轨的最大结束时间
     const lengthSec = useMemo(
         () =>
             Math.max(
                 motionClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
                 exprClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
+                audioClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
                 0
             ),
-        [motionClips, exprClips]
+        [motionClips, exprClips, audioClips]
     );
 
     const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -200,7 +203,7 @@ export default function Timeline({
         const totalPx = Math.max(pps * Math.max(1, lengthSec), 600);
         return (
             <div className="tl-track">
-                <div className="tl-title">{title}</div>
+                <div className="tl-title" style={{ marginBottom: '2px' }}>{title}</div>
                 <div className="tl-lane" style={{ height: TRACK_H }}>
                     {/* 网格：1s 间隔 */}
                     <div className="tl-grid" style={{ width: totalPx }}>
@@ -214,11 +217,13 @@ export default function Timeline({
                         {clips.map((c) => {
                             const left = c.start * pps;
                             const width = Math.max(pps * c.duration, 28);
+                            const isAudio = track === "audio";
+                            
                             return (
                                 <div
                                     key={c.id}
-                                    className="tl-clip"
-                                    title={`${c.name}  ${c.duration.toFixed(2)}s (双击播放)`}
+                                    className={`tl-clip ${isAudio ? 'tl-clip--audio' : ''}`}
+                                    title={`${c.name}  ${c.duration.toFixed(2)}s ${isAudio ? '(音频)' : '(双击播放)'}`}
                                     style={{
                                         left,
                                         width,
@@ -226,6 +231,8 @@ export default function Timeline({
                                         top: (TRACK_H - CLIP_H) / 2,
                                         background: color,
                                         cursor: 'pointer',
+                                        position: 'relative',
+                                        overflow: 'hidden',
                                     }}
                                     onMouseDown={(e) => {
                                         // 排除点到把手
@@ -244,6 +251,40 @@ export default function Timeline({
                                         }
                                     }}
                                 >
+                                    {/* 音频波形可视化 */}
+                                    {isAudio && (
+                                        <div className="tl-audio-waveform" style={{
+                                            position: 'absolute',
+                                            top: 0,
+                                            left: 0,
+                                            right: 0,
+                                            bottom: 0,
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            opacity: 0.3,
+                                        }}>
+                                            {/* 更真实的波形条 - 基于片段ID生成一致的波形 */}
+                                            {Array.from({ length: Math.min(20, Math.floor(width / 4)) }).map((_, i) => {
+                                                // 基于片段ID和位置生成一致的波形
+                                                const seed = c.id.charCodeAt(i % c.id.length) + i;
+                                                const height = (seed * 13 + i * 7) % 60 + 20; // 20-80% 高度
+                                                return (
+                                                    <div
+                                                        key={i}
+                                                        style={{
+                                                            width: '2px',
+                                                            height: `${height}%`,
+                                                            background: 'rgba(255,255,255,0.8)',
+                                                            margin: '0 1px',
+                                                            borderRadius: '1px',
+                                                        }}
+                                                    />
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                    
                                     {/* 左右裁剪把手 */}
                                     <div
                                         className="tl-handle tl-handle--l"
@@ -262,8 +303,16 @@ export default function Timeline({
                                             });
                                         }}
                                     />
-                                    <div className="tl-clip-name">{c.name}</div>
-                                    <div className="tl-clip-dur">{c.duration.toFixed(2)}s</div>
+                                    <div className="tl-clip-name" style={{
+                                        position: 'relative',
+                                        zIndex: 2,
+                                        textShadow: isAudio ? '1px 1px 2px rgba(0,0,0,0.8)' : 'none',
+                                    }}>{c.name}</div>
+                                    <div className="tl-clip-dur" style={{
+                                        position: 'relative',
+                                        zIndex: 2,
+                                        textShadow: isAudio ? '1px 1px 2px rgba(0,0,0,0.8)' : 'none',
+                                    }}>{c.duration.toFixed(2)}s</div>
                                     <div 
                                         className="tl-clip-remove" 
                                         onClick={(e) => {
@@ -376,6 +425,7 @@ export default function Timeline({
             <Ruler />
             <Track title="动作" clips={motionClips} color="#7c4dff" track="motion" />
             <Track title="表情" clips={exprClips} color="#26a69a" track="expr" />
+            <Track title="音频" clips={audioClips} color="#ff6b35" track="audio" />
         </div>
     );
 }

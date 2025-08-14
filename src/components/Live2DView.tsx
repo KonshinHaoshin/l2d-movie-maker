@@ -52,12 +52,15 @@ export default function Live2DView() {
   // —— 时间线 —— //
   const [motionClips, setMotionClips] = useState<Clip[]>([]);
   const [exprClips, setExprClips] = useState<Clip[]>([]);
+  const [audioClips, setAudioClips] = useState<Clip[]>([]); // 新增音频轨
   const [playhead, setPlayhead] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
 
+  // 音频播放管理
+  const audioRefs = useRef<Map<string, HTMLAudioElement>>(new Map());
+
   const rafRef = useRef<number | null>(null);
   const startTsRef = useRef<number | null>(null);
-  const firedRef = useRef<Set<string>>(new Set());
 
   // 默认时长（兜底）
   const [motionDur, setMotionDur] = useState(2);
@@ -66,11 +69,24 @@ export default function Live2DView() {
   // 每组 motion 的真实时长
   const [motionLen, setMotionLen] = useState<MotionLenMap>({});
 
-  const clearTimeline = () => { setMotionClips([]); setExprClips([]); setPlayhead(0); };
+  const clearTimeline = () => { 
+    setMotionClips([]); 
+    setExprClips([]); 
+    setAudioClips([]); 
+    setPlayhead(0); 
+    
+    // 清理音频引用
+    audioRefs.current.forEach(audio => {
+      audio.pause();
+      audio.src = '';
+    });
+    audioRefs.current.clear();
+  };
 
   const changeClip = (track: TrackKind, id: string, patch: Partial<Pick<Clip, "start" | "duration">>) => {
     if (track === "motion") setMotionClips(prev => prev.map(c => (c.id === id ? { ...c, ...patch } : c)));
-    else setExprClips(prev => prev.map(c => (c.id === id ? { ...c, ...patch } : c)));
+    else if (track === "expr") setExprClips(prev => prev.map(c => (c.id === id ? { ...c, ...patch } : c)));
+    else if (track === "audio") setAudioClips(prev => prev.map(c => (c.id === id ? { ...c, ...patch } : c)));
   };
 
   const setPlayheadSec = (sec: number) => setPlayhead(sec);
@@ -365,23 +381,103 @@ export default function Live2DView() {
     setExprClips((prev) => [...prev, { id: crypto.randomUUID(), name, start: nextEnd(prev), duration: exprDur }]);
   };
 
-  const timelineLength = Math.max(nextEnd(motionClips), nextEnd(exprClips));
+  // 新增音频导入功能
+  const addAudioClip = async () => {
+    try {
+      // 创建文件输入元素
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'audio/*';
+      input.multiple = false;
+      
+      input.onchange = async (e) => {
+        const file = (e.target as HTMLInputElement).files?.[0];
+        if (!file) return;
+        
+        // 创建音频URL
+        const audioUrl = URL.createObjectURL(file);
+        
+        // 获取音频时长
+        const audio = new Audio(audioUrl);
+        await new Promise((resolve) => {
+          audio.onloadedmetadata = resolve;
+          audio.load();
+        });
+        
+        const duration = audio.duration;
+        if (duration <= 0) {
+          alert('无法获取音频时长');
+          return;
+        }
+        
+        // 创建音频片段
+        const audioClip: Clip = {
+          id: crypto.randomUUID(),
+          name: file.name.replace(/\.[^/.]+$/, ''), // 移除文件扩展名
+          start: nextEnd(audioClips),
+          duration: duration,
+          audioUrl: audioUrl,
+        };
+        
+        // 创建音频元素并存储引用
+        const audioElement = new Audio(audioUrl);
+        audioElement.preload = 'auto';
+        audioElement.volume = 0.8; // 设置默认音量
+        audioRefs.current.set(audioClip.id, audioElement);
+        
+        setAudioClips(prev => [...prev, audioClip]);
+        
+        // 清理
+        input.remove();
+      };
+      
+      input.click();
+    } catch (error) {
+      console.error('导入音频失败:', error);
+      alert('导入音频失败: ' + error);
+    }
+  };
+
+  const timelineLength = Math.max(nextEnd(motionClips), nextEnd(exprClips), nextEnd(audioClips));
 
   const tick = (ts: number) => {
     if (startTsRef.current == null) startTsRef.current = ts;
     const t = (ts - startTsRef.current) / 1000;
     setPlayhead(t);
 
+    // 每次播放都重新执行动作/表情，不使用firedRef防止重复
     for (const c of motionClips) {
-      if (t >= c.start && !firedRef.current.has(c.id)) {
+      if (t >= c.start && t < c.start + c.duration) {
+        // 在片段持续时间内持续播放动作
         playMotion(c.name);
-        firedRef.current.add(c.id);
       }
     }
     for (const c of exprClips) {
-      if (t >= c.start && !firedRef.current.has(c.id)) {
+      if (t >= c.start && t < c.start + c.duration) {
+        // 在片段持续时间内持续应用表情
         applyExpression(c.name);
-        firedRef.current.add(c.id);
+      }
+    }
+
+    // 音频播放逻辑
+    for (const c of audioClips) {
+      const audioElement = audioRefs.current.get(c.id);
+      if (!audioElement) continue;
+      
+      if (t >= c.start && t < c.start + c.duration) {
+        // 如果音频还没开始播放，开始播放
+        if (audioElement.paused) {
+          audioElement.currentTime = t - c.start;
+          audioElement.play().catch(err => {
+            console.warn('音频播放失败:', err);
+          });
+        }
+      } else {
+        // 如果音频不在播放时间范围内，停止播放
+        if (!audioElement.paused) {
+          audioElement.pause();
+          audioElement.currentTime = 0;
+        }
       }
     }
 
@@ -394,7 +490,7 @@ export default function Live2DView() {
 
   const startPlayback = () => {
     if (isPlaying || timelineLength <= 0) return;
-    firedRef.current.clear();
+    // 不再需要清理firedRef，因为我们每次都重新播放
     setPlayhead(0);
     setIsPlaying(true);
     startTsRef.current = null;
@@ -406,6 +502,14 @@ export default function Live2DView() {
     rafRef.current = null;
     startTsRef.current = null;
     setIsPlaying(false);
+    
+    // 停止所有音频播放
+    audioRefs.current.forEach(audio => {
+      if (!audio.paused) {
+        audio.pause();
+        audio.currentTime = 0;
+      }
+    });
   };
 
   // —— 录制 —— //
@@ -418,7 +522,8 @@ export default function Live2DView() {
 
     const totalDuration = Math.max(
       motionClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
-      exprClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0)
+      exprClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
+      audioClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0)
     );
     if (totalDuration <= 0) {
       alert("请先在时间线中添加动作或表情片段");
@@ -829,12 +934,14 @@ export default function Live2DView() {
           chooseExpression={(name) => { applyExpression(name); setCurrentExpression(name); }}
           addMotionClip={addMotionClip}
           addExprClip={addExprClip}
+          addAudioClip={addAudioClip}
           enableDragging={enableDragging}
           setEnableDragging={setEnableDragging}
           isDragging={isDragging}
           timelineLength={Math.max(
             motionClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
-            exprClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0)
+            exprClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
+            audioClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0)
           )}
           playhead={playhead}
           isPlaying={isPlaying}
@@ -858,11 +965,22 @@ export default function Live2DView() {
       <Timeline
         motionClips={motionClips}
         exprClips={exprClips}
+        audioClips={audioClips}
         playheadSec={playhead}
         onChangeClip={changeClip}
         onRemoveClip={(track, id) => {
           if (track === "motion") setMotionClips(prev => prev.filter(c => c.id !== id));
-          else setExprClips(prev => prev.filter(c => c.id !== id));
+          else if (track === "expr") setExprClips(prev => prev.filter(c => c.id !== id));
+          else if (track === "audio") {
+            setAudioClips(prev => prev.filter(c => c.id !== id));
+            // 清理音频引用
+            const audio = audioRefs.current.get(id);
+            if (audio) {
+              audio.pause();
+              audio.src = '';
+              audioRefs.current.delete(id);
+            }
+          }
         }}
         onSetPlayhead={setPlayheadSec}
         onStartPlayback={startPlayback}

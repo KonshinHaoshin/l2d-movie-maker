@@ -10,7 +10,7 @@
 .l2d-stage {
     position: absolute;
     inset: 0;
-    padding-bottom: 160px; /* 给底部时间线留空间 */
+    padding-bottom: 120px; /* 减少给底部时间线留的空间 */
 }
 .l2d-stage-canvas {
     position: absolute;
@@ -202,22 +202,24 @@
 .tl-tick-sub { position: absolute; top: 8px; bottom: 0; width: 1px; background: rgba(255,255,255,.05); }
 .tl-tick-label { position: absolute; top: 2px; left: 4px; font-size: 11px; color: #bbb; }
 
-.tl-track { margin-top: 6px; }
-.tl-title { font-size: 12px; opacity: .8; margin-bottom: 4px; }
+.tl-track { 
+    margin-top: 0; /* 移除轨道间距 */
+}
+
+.tl-title { 
+    font-size: 11px; 
+    opacity: .8; 
+    margin-bottom: 2px; 
+    line-height: 1;
+}
 
 /* 轨道容器：固定高、只横向滚动 */
 .tl-lane {
+    height: 40px !important; /* 减少轨道高度 */
+    background: #2a2a2a;
     position: relative;
-    height: 56px;              /* = TRACK_H */
-    background: #1c1c1c;
-    border-radius: 6px;
-
-    overflow-x: auto;          /* 只保留横向滚动 */
-    overflow-y: hidden;        /* 禁用竖向滚动 —— 关键 */
-    scrollbar-gutter: stable both-edges; /* 防止滚动条出现/消失引起抖动 */
-
-    /* ↓ 可删 */
-    /* white-space: nowrap; */
+    border-radius: 4px;
+    overflow: hidden;
 }
 
 .tl-grid {
@@ -332,6 +334,28 @@
 
 /* 便于肉眼确认（可删） */
 .tl-clip { box-shadow: inset 0 0 0 1px rgba(255,255,255,.2); }
+
+/* 音频轨特殊样式 */
+.tl-clip--audio {
+    background: linear-gradient(135deg, #ff6b35 0%, #f7931e 100%) !important;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    box-shadow: 0 2px 8px rgba(255, 107, 53, 0.4);
+}
+
+.tl-clip--audio:hover {
+    box-shadow: 0 4px 12px rgba(255, 107, 53, 0.6);
+    transform: translateY(-1px);
+    transition: all 0.2s ease;
+}
+
+.tl-audio-waveform {
+    pointer-events: none;
+    z-index: 1;
+}
+
+.tl-audio-waveform > div {
+    transition: height 0.3s ease;
+}
 
 /* ========== 透明背景支持 ========== */
 .live2d-container {
@@ -489,4 +513,13 @@
 .tl-ruler:hover {
     background: #1e1e1e;
     border-color: #505050;
+}
+
+.tl-root {
+    background: #1a1a1a;
+    padding: 12px;
+    border-radius: 8px;
+    margin: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    min-height: 180px; /* 减少最小高度 */
 }

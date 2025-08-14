@@ -37,6 +37,7 @@ type Props = {
   chooseExpression: (name: string) => void;
   addMotionClip: (name: string) => void;
   addExprClip: (name: string) => void;
+  addAudioClip: () => void; // 新增音频导入功能
 
   // 拖拽
   enableDragging: boolean;
@@ -75,7 +76,7 @@ const ControlPanel: React.FC<Props> = (props) => {
     modelData, motionLen,
     currentMotion, currentExpression,
     motionDur, exprDur, setMotionDur, setExprDur,
-    chooseMotion, chooseExpression, addMotionClip, addExprClip,
+    chooseMotion, chooseExpression, addMotionClip, addExprClip, addAudioClip,
     enableDragging, setEnableDragging, isDragging,
     timelineLength, playhead, isPlaying, startPlayback, stopPlayback,
     clearTimeline,
@@ -334,6 +335,22 @@ const ControlPanel: React.FC<Props> = (props) => {
             ⏹ 停止
           </button>
           <button className="btn" onClick={clearTimeline}>🗑 清空</button>
+          <button 
+            className="btn" 
+            onClick={addAudioClip}
+            style={{ background: '#ff6b35', color: 'white' }}
+          >
+            🎵 导入音频
+          </button>
+        </div>
+        
+        {/* 音频控制提示 */}
+        <div style={{ marginTop: 8, padding: 8, background: 'rgba(255,107,53,0.1)', borderRadius: 4, fontSize: 11 }}>
+          🔊 <strong>音频播放提示：</strong><br />
+          • 确保系统音量已开启<br />
+          • 浏览器允许音频播放<br />
+          • 音频文件格式支持（MP3、WAV、OGG等）<br />
+          • 如果听不到声音，请检查音频文件是否正常
         </div>
       </div>
 
