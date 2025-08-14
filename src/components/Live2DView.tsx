@@ -321,11 +321,57 @@ export default function Live2DView() {
     await invoke("vp9_to_prores4444", { inWebm: abs, outMov: out });
   };
 
-                // 导入WebGAL时间线
-// Live2DView.tsx 里
-const importWebGALTimeline = async (gameDir: string, commands: any[]) => {
-  try {
-    const parser = new WebGALParser(gameDir); // ✅ 基准目录来自 WebGALMode
+
+
+  // 在WebGAL模型加载成功后清理本地模式模型
+  const cleanupLocalModeModelsAfterWebGAL = () => {
+    try {
+      console.log('🧹 WebGAL模型加载成功，开始清理本地模式模型...');
+      
+      // 这里不需要清理当前模型，因为当前显示的就是WebGAL模型
+      // 只需要重置本地模式相关的状态
+      setModelData(null);
+      setCustomRecordingBounds({ x: 0, y: 0, width: 0, height: 0 });
+      
+      console.log('✅ 本地模式状态已清理，WebGAL模型保持显示');
+      
+    } catch (error) {
+      console.warn('⚠️ 清理本地模式状态时出现警告:', error);
+    }
+  };
+
+
+
+  // 退出WebGAL模式时的清理
+  const exitWebGALMode = () => {
+    try {
+      console.log('🚪 退出WebGAL模式，开始清理...');
+      
+      // 清理WebGAL模式的模型
+      if (modelManager) {
+        modelManager.cleanupCurrentModel();
+      }
+      
+      console.log('🏷️ WebGAL模式状态已重置');
+      
+      // 清理时间线
+      clearTimeline();
+      
+      console.log('✅ WebGAL模式退出完成');
+      
+    } catch (error) {
+      console.warn('⚠️ 退出WebGAL模式时出现警告:', error);
+    }
+  };
+
+    // 导入WebGAL时间线
+  const importWebGALTimeline = async (commands: any[]) => {
+    try {
+      console.log('🎭 进入WebGAL模式');
+      
+      console.log('📝 设置WebGAL命令状态，命令数量:', commands.length);
+      
+      const parser = new WebGALParser();
 
     let currentTime = 0;
 
@@ -335,45 +381,32 @@ const importWebGALTimeline = async (gameDir: string, commands: any[]) => {
 
         if (figure.path) {
           try {
-            // 先解析成绝对路径（一定包含盘符）
-            const resolved = await parser.resolveFigurePath(figure.path);
+            // 解析为完整的figure路径（包含正确端口）
+            const resolved = parser.resolveFigurePath(figure.path);
             console.log('🧭 解析后的模型路径:', resolved);
 
-            // 读取一下看看是否可达（可选）
-            await parser.loadModelFile(resolved); // 使用解析后的绝对路径
-            console.log('✅ 模型文件读取成功:', resolved);
-          } catch (error) {
-            console.error('❌ 模型文件读取失败:', {
-              originalPath: figure.path,
-              error: error instanceof Error ? error.message : String(error),
-              stack: error instanceof Error ? error.stack : undefined
-            });
-            
-            // 尝试获取更多调试信息
+            // 尝试加载模型到Live2D视图
             try {
-              const resolved = await parser.resolveFigurePath(figure.path);
-              console.log('🔍 调试信息 - 解析后的路径:', resolved);
+              // 使用通用的loadAnyModel方法加载模型
+              await modelManager.loadAnyModel(appRef.current!, resolved);
+              console.log('✅ 模型加载成功:', resolved);
               
-              // 尝试直接测试文件访问
-              console.log('🧪 测试直接文件访问...');
-              try {
-                const testContent = await parser.loadModelFile(resolved); // 使用解析后的路径
-                console.log('✅ 直接访问成功，文件大小:', testContent.length);
-              } catch (testError) {
-                console.log('❌ 直接访问失败:', testError);
-                
-                // 尝试直接测试文件访问
-                console.log('🧪 尝试直接文件访问...');
-                const directAccess = await parser.testDirectFileAccess(resolved);
-                if (directAccess) {
-                  console.log('✅ 直接访问成功！');
-                } else {
-                  console.log('❌ 直接访问也失败');
-                }
-              }
-            } catch (debugError) {
-              console.log('🔍 调试信息 - 路径解析也失败:', debugError);
+              // WebGAL模式成功加载模型后，清理本地模式的旧模型
+              // 注意：这里清理的是本地模式，不是刚加载的WebGAL模型
+              cleanupLocalModeModelsAfterWebGAL();
+              
+            } catch (loadError) {
+              console.error('❌ 模型加载失败:', {
+                originalPath: figure.path,
+                resolvedPath: resolved,
+                error: loadError instanceof Error ? loadError.message : String(loadError)
+              });
             }
+          } catch (error) {
+            console.error('❌ 模型路径解析失败:', {
+              originalPath: figure.path,
+              error: error instanceof Error ? error.message : String(error)
+            });
           }
         }
 
@@ -405,8 +438,8 @@ const importWebGALTimeline = async (gameDir: string, commands: any[]) => {
       } else if (command.type === 'dialogue') {
         const dialogue = command.data;
 
-        // 解析音频绝对路径
-        const audioAbs = await parser.resolveAudioPath(dialogue.audioPath);
+        // 解析音频路径
+        const audioAbs = parser.resolveAudioPath(dialogue.audioPath);
 
         if (audioAbs) {
           try {
@@ -721,12 +754,13 @@ const importWebGALTimeline = async (gameDir: string, commands: any[]) => {
        />
 
        {/* WebGAL模式 */}
-       {showWebGALMode && (
-         <WebGALMode
-           onClose={() => setShowWebGALMode(false)}
-           onImportTimeline={importWebGALTimeline}
-         />
-       )}
+               {showWebGALMode && (
+          <WebGALMode
+            onClose={() => setShowWebGALMode(false)}
+            onImportTimeline={importWebGALTimeline}
+            onExitWebGALMode={exitWebGALMode}
+          />
+        )}
 
       {/* 控制面板 */}
       {showControls && (

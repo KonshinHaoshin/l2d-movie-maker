@@ -126,6 +126,26 @@
     letter-spacing: .2px;
   }
   
+  .webgal-header-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .webgal-exit {
+    border: none;
+    background: var(--wg-warning);
+    color: white;
+    font-size: 14px;
+    line-height: 1;
+    padding: 8px 12px;
+    border-radius: var(--wg-radius-sm);
+    cursor: pointer;
+    font-weight: 500;
+    transition: background-color 0.2s;
+  }
+  .webgal-exit:hover { background: var(--wg-warning); opacity: 0.9; }
+
   .webgal-close {
     border: none;
     background: transparent;

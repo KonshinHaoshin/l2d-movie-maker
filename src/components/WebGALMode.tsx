@@ -1,57 +1,24 @@
 // src/components/WebGALMode.tsx
 import { useState } from "react";
 import { WebGALParser, type WebGALCommand } from "../utils/webgalParser";
-import { open } from "@tauri-apps/plugin-dialog";
 import "./WebGALMode.css";
 
 interface WebGALModeProps {
   onClose: () => void;
-  onImportTimeline: (gameDir: string, commands: WebGALCommand[]) => void;
+  onImportTimeline: (commands: WebGALCommand[]) => void;
+  onExitWebGALMode?: () => void;
 }
 
-export default function WebGALMode({ onClose, onImportTimeline }: WebGALModeProps) {
-  const [gamePath, setGamePath] = useState<string>("");
+export default function WebGALMode({ onClose, onImportTimeline, onExitWebGALMode }: WebGALModeProps) {
   const [script, setScript] = useState<string>("");
   const [parsedCommands, setParsedCommands] = useState<WebGALCommand[]>([]);
   const [isParsing, setIsParsing] = useState(false);
   const [error, setError] = useState<string>("");
 
-  const exampleScript = `changeFigure: 改模/拼好模/大棉袄/大棉袄.jsonl -id=anon -next -motion=taki_smile04 -expression=soyo_smile01;
-千早爱音:吼~这样吗？要是你需要的话也不是不行哦？汪汪！ -anon/wjzs2/anon_wjzs2_09.wav -fontSize=default -id -figureId=anon;
-changeFigure: sakiko/casual-墨镜/model.json -id=sakiko -next -motion=mana_surprised01 -expression=nyamu_surprised01;
-丰川祥子:...你不会有什么奇怪的癖好吧？ -sakiko/wjzs2/sakiko_wjzs2_15.wav -fontSize=default -id -figureId=sakiko;`;
-
-  async function pickGameDir() {
-    try {
-      const dir = await open({ directory: true, multiple: false });
-      if (typeof dir === "string" && dir) {
-        setGamePath(dir);
-        setError("");
-      }
-    } catch (e: any) {
-      setError(`选择目录失败：${e?.message ?? e}`);
-    }
-  }
-
-  async function pickFigureFile() {
-    try {
-      const file = await open({
-        multiple: false,
-        filters: [{ name: "Live2D/JSON", extensions: ["json", "jsonl"] }],
-      });
-      if (typeof file === "string" && file) {
-        setError("✅ 文件选择成功！请确保上面“游戏目录路径”指向正确的项目根目录。");
-      }
-    } catch (e: any) {
-      setError(`选择文件失败：${e?.message ?? e}`);
-    }
-  }
+  const exampleScript = `changeFigure: 改模/拼好模/大棉袄/大棉袄.jsonl -id=anon -motion=taki_smile04 -expression=soyo_smile01;
+千早爱音:吼~这样吗？要是你需要的话也不是不行哦？汪汪！ -anon/wjzs2/anon_wjzs2_09.wav;`;
 
   async function parseScriptClick() {
-    if (!gamePath.trim()) {
-      setError("请先选择或输入游戏目录路径");
-      return;
-    }
     if (!script.trim()) {
       setError("请输入脚本内容");
       return;
@@ -59,7 +26,7 @@ changeFigure: sakiko/casual-墨镜/model.json -id=sakiko -next -motion=mana_surp
     setIsParsing(true);
     setError("");
     try {
-      const parser = new WebGALParser(gamePath);
+      const parser = new WebGALParser();
       const commands = parser.parseScript(script);
       if (commands.length === 0) {
         setError("未解析到任何有效命令");
@@ -78,7 +45,7 @@ changeFigure: sakiko/casual-墨镜/model.json -id=sakiko -next -motion=mana_surp
       setError("没有可导入的命令");
       return;
     }
-    onImportTimeline(gamePath.trim(), parsedCommands);
+    onImportTimeline(parsedCommands);
     onClose();
   }
 
@@ -86,30 +53,24 @@ changeFigure: sakiko/casual-墨镜/model.json -id=sakiko -next -motion=mana_surp
     <div className="webgal-mode">
       <div className="webgal-header">
         <h3>🎮 WebGAL 模式</h3>
-        <button className="webgal-close" onClick={onClose}>
-          ✕
-        </button>
+        <div className="webgal-header-actions">
+          {onExitWebGALMode && (
+            <button className="webgal-exit" onClick={onExitWebGALMode}>
+              🚪 退出模式
+            </button>
+          )}
+          <button className="webgal-close" onClick={onClose}>
+            ✕
+          </button>
+        </div>
       </div>
 
       <div className="webgal-section">
-        <h4>📁 游戏目录</h4>
-        <div className="directory-selector">
-          <input
-            type="text"
-            className="directory-input"
-            value={gamePath}
-            onChange={(e) => setGamePath(e.target.value)}
-            placeholder="选择或输入游戏根目录，如：F:\EASMOUNT_terre\public\games\EASTMOUNT"
-          />
-          <button className="select-dir-btn" onClick={pickGameDir}>
-            选择目录
-          </button>
-          <button className="select-dir-btn" onClick={pickFigureFile}>
-            选择立绘文件
-          </button>
-        </div>
+        <h4>📁 文件路径说明</h4>
         <div className="directory-info">
-          <small>💡 立绘相对路径会默认从 <code>game/figure/</code> 解析。</small>
+          <small>💡 所有模型文件将从 <code>figure/</code> 文件夹读取<br/>
+          • 模型路径：<code>figure/改模/拼好模/大棉袄/大棉袄.jsonl</code><br/>
+          • 音频路径：<code>anon/wjzs2/anon_wjzs2_09.wav</code></small>
         </div>
       </div>
 
@@ -132,6 +93,13 @@ changeFigure: sakiko/casual-墨镜/model.json -id=sakiko -next -motion=mana_surp
             </button>
           </div>
         </div>
+        <div className="script-info">
+          <small>💡 <strong>changeFigure命令格式：</strong><br/>
+          <code>changeFigure: 路径/到/模型.jsonl -id=角色ID -motion=动作名 -expression=表情名;</code><br/>
+          • 支持 .json 和 .jsonl 文件<br/>
+          • 路径会从 figure/ 文件夹开始查找<br/>
+          • 会自动加载模型并设置动作/表情</small>
+        </div>
         <textarea
           className="script-input"
           value={script}
@@ -142,7 +110,7 @@ changeFigure: sakiko/casual-墨镜/model.json -id=sakiko -next -motion=mana_surp
       </div>
 
       <div className="webgal-section">
-        <button className="parse-btn" onClick={parseScriptClick} disabled={!gamePath || !script.trim() || isParsing}>
+        <button className="parse-btn" onClick={parseScriptClick} disabled={!script.trim() || isParsing}>
           {isParsing ? "解析中..." : "🔍 解析脚本"}
         </button>
       </div>

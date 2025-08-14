@@ -36,9 +36,12 @@ fn start_static_server(model_root: PathBuf) -> u16 {
         match Server::http(format!("127.0.0.1:{}", port)) {
             Ok(server) => {
                 // 成功绑定端口，启动服务器
+                let exe_dir = exe_dir();
+                let figure_root = exe_dir.join("figure");
+                
                 thread::spawn(move || {
                     for req in server.incoming_requests() {
-                        handle_req(req, &model_root);
+                        handle_req_with_roots(req, &model_root, &figure_root);
                     }
                 });
                 return port;
@@ -56,15 +59,17 @@ fn start_static_server(model_root: PathBuf) -> u16 {
 
 /// 处理 HTTP 请求
 fn handle_req(req: Request, model_root: &PathBuf) {
-    // 只允许 /model/... 路由
     let url = req.url().to_string();
-    if !url.starts_with("/model/") {
+    
+    // 支持 /model/... 和 /figure/... 路由
+    let (prefix, rel) = if url.starts_with("/model/") {
+        ("/model/", url.strip_prefix("/model/").unwrap_or(""))
+    } else if url.starts_with("/figure/") {
+        ("/figure/", url.strip_prefix("/figure/").unwrap_or(""))
+    } else {
         let _ = req.respond(Response::from_string("Not Found").with_status_code(404));
         return;
-    }
-
-    // 去掉开头的 /model/，获取相对路径
-    let rel = url.strip_prefix("/model/").unwrap_or("");
+    };
     
     // 对相对路径进行URL解码，处理中文字符等非ASCII字符
     let decoded_rel = match urlencoding::decode(rel) {
@@ -80,6 +85,55 @@ fn handle_req(req: Request, model_root: &PathBuf) {
     // 禁止目录遍历
     if let Ok(canon) = path.canonicalize() {
         if !canon.starts_with(model_root.canonicalize().unwrap()) {
+            let _ = req.respond(Response::from_string("Forbidden").with_status_code(403));
+            return;
+        }
+    }
+
+    // 读取文件
+    match std::fs::read(&path) {
+        Ok(bytes) => {
+            let mime = mime_guess::from_path(&path).first_or_octet_stream();
+            let mut resp = Response::from_data(bytes);
+            resp.add_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], mime.as_ref()).unwrap());
+            // 允许跨源（前端是 http://localhost）
+            resp.add_header(tiny_http::Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap());
+            let _ = req.respond(resp);
+        }
+        Err(_) => {
+            let _ = req.respond(Response::from_string("Not Found").with_status_code(404));
+        }
+    }
+}
+
+/// 处理 HTTP 请求（支持多个根目录）
+fn handle_req_with_roots(req: Request, model_root: &PathBuf, figure_root: &PathBuf) {
+    let url = req.url().to_string();
+    
+    // 支持 /model/... 和 /figure/... 路由
+    let (root_dir, rel) = if url.starts_with("/model/") {
+        (model_root, url.strip_prefix("/model/").unwrap_or(""))
+    } else if url.starts_with("/figure/") {
+        (figure_root, url.strip_prefix("/figure/").unwrap_or(""))
+    } else {
+        let _ = req.respond(Response::from_string("Not Found").with_status_code(404));
+        return;
+    };
+    
+    // 对相对路径进行URL解码，处理中文字符等非ASCII字符
+    let decoded_rel = match urlencoding::decode(rel) {
+        Ok(decoded) => decoded,
+        Err(_) => {
+            let _ = req.respond(Response::from_string("Invalid URL encoding").with_status_code(400));
+            return;
+        }
+    };
+    
+    let path = root_dir.join(&*decoded_rel);
+
+    // 禁止目录遍历
+    if let Ok(canon) = path.canonicalize() {
+        if !canon.starts_with(root_dir.canonicalize().unwrap()) {
             let _ = req.respond(Response::from_string("Forbidden").with_status_code(403));
             return;
         }
@@ -300,6 +354,9 @@ pub fn get_model_server_info() -> Result<ModelServerInfo, String> {
     // 使用静态变量缓存端口号
     static PORT: OnceLock<u16> = OnceLock::new();
     let port = *PORT.get_or_init(|| start_static_server(model_dir.clone()));
+    
+    // 设置环境变量，让前端知道实际端口
+    std::env::set_var("VITE_TAURI_SERVER_PORT", port.to_string());
     
     Ok(ModelServerInfo {
         base_url: format!("http://127.0.0.1:{}/model", port),
