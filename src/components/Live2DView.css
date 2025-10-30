@@ -813,6 +813,33 @@
     cursor: not-allowed;
 }
 
+/* 截图按钮 */
+.screenshot-button {
+    background: #ff9500;
+    color: #fff;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: background-color 0.2s ease;
+}
+
+.screenshot-button:hover {
+    background: #e68500;
+}
+
+/* 按钮网格布局 - 每行两个按钮 */
+.button-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+}
+
+.button-grid > button {
+    width: 100%;
+}
+
 /* Canvas 样式 */
 .live2d-canvas {
     background: transparent;

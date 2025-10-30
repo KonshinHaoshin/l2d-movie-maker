@@ -687,6 +687,7 @@ export default function Live2DView() {
         onStopRecording={stopRecording}
         onSaveWebM={saveWebM}
         onConvertToMov={toMov}
+        onTakeScreenshot={() => recordingManager.takeScreenshot()}
         onResetToModelBounds={resetToModelBounds}
         isVp9AlphaSupported={isVp9AlphaSupported}
       />

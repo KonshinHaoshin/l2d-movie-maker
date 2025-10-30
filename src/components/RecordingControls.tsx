@@ -20,6 +20,7 @@ interface RecordingControlsProps {
   onStopRecording: () => void;
   onSaveWebM: () => void;
   onConvertToMov: () => void;
+  onTakeScreenshot: () => void;
   onResetToModelBounds: () => void;
   isVp9AlphaSupported: () => boolean;
 }
@@ -41,6 +42,7 @@ export default function RecordingControls({
   onStopRecording,
   onSaveWebM,
   onConvertToMov,
+  onTakeScreenshot,
   onResetToModelBounds,
   isVp9AlphaSupported
 }: RecordingControlsProps) {
@@ -202,7 +204,7 @@ export default function RecordingControls({
           disabled={!isVp9AlphaSupported()}
           className="record-button"
         >
-          ⬤ 开始录制（VP9 透明）
+          ⬤ 开始录制
         </button>
       ) : (
         <button
@@ -225,21 +227,30 @@ export default function RecordingControls({
         </div>
       )}
 
-      <button
-        onClick={onSaveWebM}
-        disabled={!blob}
-        className="download-button"
-      >
-        下载 WebM（透明）
-      </button>
+      <div className="button-grid">
+        <button
+          onClick={onSaveWebM}
+          disabled={!blob}
+          className="download-button"
+        >
+          下载 WebM
+        </button>
 
-      <button
-        onClick={onConvertToMov}
-        disabled={!blob}
-        className="convert-button"
-      >
-        转 MOV（ProRes 4444）
-      </button>
+        <button
+          onClick={onConvertToMov}
+          disabled={!blob}
+          className="convert-button"
+        >
+          转 MOV
+        </button>
+
+        <button
+          onClick={onTakeScreenshot}
+          className="screenshot-button"
+        >
+          📸 截图
+        </button>
+      </div>
     </>
   );
 } 
