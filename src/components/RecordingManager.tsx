@@ -11,6 +11,8 @@ interface Clip {
 
 interface RecordingManagerProps {
   canvasRef: React.MutableRefObject<HTMLCanvasElement | null>;
+  motionClips: Clip[];
+  exprClips: Clip[];
   audioClips: Clip[];
   recordingQuality: "low" | "medium" | "high";
   setRecState: (state: "idle" | "rec" | "done") => void;
@@ -23,6 +25,8 @@ interface RecordingManagerProps {
 
 export default function RecordingManager({
   canvasRef,
+  motionClips,
+  exprClips,
   audioClips,
   recordingQuality,
   setRecState,
@@ -43,12 +47,15 @@ export default function RecordingManager({
       return;
     }
 
+    // 计算总时长：取三条轨的最大结束时间（与播放时间线总时长一致）
     const totalDuration = Math.max(
+      motionClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
+      exprClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
       audioClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
       0
     );
     if (totalDuration <= 0) {
-      alert("请先在时间线中添加音频片段");
+      alert("请先在时间线中添加内容（动作、表情或音频）");
       return;
     }
 
