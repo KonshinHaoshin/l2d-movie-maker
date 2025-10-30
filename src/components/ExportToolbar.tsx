@@ -22,6 +22,7 @@ interface ExportToolbarProps {
   onStopRecording: () => void;
   onSaveWebM: () => void;
   onConvertToMov: () => void;
+  onTakeScreenshot: () => void;
   onResetToModelBounds: () => void;
   isVp9AlphaSupported: () => boolean;
 }

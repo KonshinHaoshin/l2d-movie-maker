@@ -114,11 +114,46 @@ export default function RecordingManager({
     console.log('转换为MOV功能需要从外部传入blob');
   };
 
+  // 截图（保留RGBA通道）
+  const takeScreenshot = async () => {
+    if (!canvasRef.current) return;
+    
+    try {
+      // 将canvas转换为blob（PNG格式，保留alpha通道）
+      const blob = await new Promise<Blob | null>((resolve) => {
+        canvasRef.current!.toBlob((blob) => {
+          resolve(blob);
+        }, 'image/png', 1.0); // PNG格式，最高质量
+      });
+
+      if (!blob) {
+        alert('截图失败');
+        return;
+      }
+
+      // 创建下载链接
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `screenshot-${Date.now()}.png`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      console.log('✅ 截图已保存');
+    } catch (error) {
+      console.error('截图失败:', error);
+      alert('截图失败: ' + error);
+    }
+  };
+
   return {
     recRef,
     start,
     stop,
     saveWebM,
-    toMov
+    toMov,
+    takeScreenshot
   };
 } 
