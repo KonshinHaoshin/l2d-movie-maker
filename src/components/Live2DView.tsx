@@ -301,6 +301,8 @@ export default function Live2DView() {
 
   const recordingManager = RecordingManager({
     canvasRef,
+    motionClips,
+    exprClips,
     audioClips,
     recordingQuality,
     setRecState,
