@@ -21,6 +21,7 @@ interface RecordingControlsProps {
   onSaveWebM: () => void;
   onConvertToMov: () => void;
   onTakeScreenshot: () => void;
+  onTakePartsScreenshots: () => void;
   onResetToModelBounds: () => void;
   isVp9AlphaSupported: () => boolean;
 }
@@ -43,6 +44,7 @@ export default function RecordingControls({
   onSaveWebM,
   onConvertToMov,
   onTakeScreenshot,
+  onTakePartsScreenshots,
   onResetToModelBounds,
   isVp9AlphaSupported
 }: RecordingControlsProps) {
@@ -249,6 +251,13 @@ export default function RecordingControls({
           className="screenshot-button"
         >
           📸 截图
+        </button>
+
+        <button
+          onClick={onTakePartsScreenshots}
+          className="parts-screenshot-button"
+        >
+          📦 部件截图
         </button>
       </div>
     </>
