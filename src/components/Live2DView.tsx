@@ -296,6 +296,7 @@ export default function Live2DView() {
 
   const recordingManager = RecordingManager({
     canvasRef,
+    modelRef,
     motionClips,
     exprClips,
     audioClips,
@@ -864,6 +865,7 @@ export default function Live2DView() {
         onSaveWebM={saveWebM}
         onConvertToMov={toMov}
         onTakeScreenshot={() => recordingManager.takeScreenshot()}
+        onTakePartsScreenshots={() => recordingManager.takePartsScreenshots()}
         onResetToModelBounds={resetToModelBounds}
         isVp9AlphaSupported={isVp9AlphaSupported}
       />
