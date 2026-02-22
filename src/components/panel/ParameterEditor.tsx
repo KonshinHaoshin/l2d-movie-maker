@@ -77,26 +77,48 @@ export function ParameterEditor({
     // 否则使用原有的检测逻辑
     if (!model) return;
 
-    const params: any[] = [];
+    // 定义参数类型
+    interface ParamInfo {
+      id: string;
+      name: string;
+      value: number;
+      min: number;
+      max: number;
+      modelIndex: number;
+    }
+
+    const params: ParamInfo[] = [];
     const visited = new Set<string>();
 
     // 遍历所有模型（主模型 + 子模型）
     const modelsToCheck = isComposite ? [model, ...subModels] : [model];
 
     modelsToCheck.forEach((m, modelIndex) => {
+      if (!m) return;
+      
       try {
-        const im = (m as any).internalModel;
+        // 改进类型推断
+        const modelAny = m as unknown as {
+          internalModel?: {
+            coreModel?: {
+              _paramIds?: string[];
+              getParamFloat?: (id: string) => number;
+              getParamMinValue?: (id: string) => number;
+              getParamMaxValue?: (id: string) => number;
+            }
+          }
+        };
+        
+        const im = modelAny.internalModel;
         if (!im?.coreModel) return;
 
         const coreModel = im.coreModel;
 
         // 尝试获取参数列表
-        // Cubism 4: coreModel._paramIds
-        // Cubism 5: 需要通过其他方式
         let paramIds: string[] = [];
         
-        if ((coreModel as any)._paramIds && Array.isArray((coreModel as any)._paramIds)) {
-          paramIds = (coreModel as any)._paramIds;
+        if (coreModel._paramIds && Array.isArray(coreModel._paramIds)) {
+          paramIds = coreModel._paramIds;
         } else {
           // 尝试从 Common params 获取
           paramIds = COMMON_PARAMS;
@@ -108,17 +130,20 @@ export function ParameterEditor({
 
           try {
             const value = coreModel.getParamFloat?.(paramId) ?? 0;
+            const min = coreModel.getParamMinValue?.(paramId) ?? -1;
+            const max = coreModel.getParamMaxValue?.(paramId) ?? 1;
+            
             originalValuesRef.current.set(paramId, value);
 
             params.push({
               id: paramId,
               name: paramId.replace(/^Param/, ""),
               value,
-              min: -1,
-              max: 1,
+              min,
+              max,
               modelIndex,
             });
-          } catch (e) {
+          } catch {
             // 参数可能不存在
           }
         });
