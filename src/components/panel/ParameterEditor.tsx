@@ -361,6 +361,35 @@ export function ParameterEditor({
     }
   };
 
+  // 导出到时间线（作为 param 类型的 clips）
+  const exportToTimeline = (): any[] => {
+    const clips: any[] = [];
+    
+    tracks.forEach(track => {
+      track.keyframes.forEach(kf => {
+        clips.push({
+          id: `param_${kf.time}_${track.parameterId}`,
+          kind: "param",
+          name: track.parameterId,
+          start: kf.time,
+          duration: 0.1, // 参数 clip 很短
+          paramId: track.parameterId,
+          paramValue: kf.value
+        });
+      });
+    });
+    
+    return clips;
+  };
+
+  // 显示导出的 clips（用于复制）
+  const showExportedClips = () => {
+    const clips = exportToTimeline();
+    const json = JSON.stringify(clips, null, 2);
+    console.log("导出的参数 clips:", clips);
+    alert(`已生成 ${clips.length} 个参数 clips\n查看控制台获取 JSON`);
+  };
+
   const restoreAllParameters = useCallback(() => {
     originalValuesRef.current.forEach((value, paramId) => {
       setParameterValue(paramId, value);
@@ -397,6 +426,7 @@ export function ParameterEditor({
         <div className="keyframe-actions">
           <button onClick={exportKeyframes}>⬇️ 导出</button>
           <button onClick={importKeyframes}>⬆️ 导入</button>
+          <button onClick={showExportedClips}>📋 复制</button>
           <button onClick={clearAllKeyframes}>🗑️ 清除</button>
         </div>
       )}
