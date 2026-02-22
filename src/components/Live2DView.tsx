@@ -303,16 +303,36 @@ export default function Live2DView() {
 
   const setPlayheadSec = (sec: number) => setPlayhead(sec);
 
-  // ——— 播放（广播到所有子模型） —— //
-  const playMotion = (group: string) => {
+  // ——— 播放（可指定角色） —— //
+  const playMotion = (group: string, targetCharacterId?: string) => {
     if (!modelData?.motions[group]) return;
-    modelManager.forEachModel((m) => m.motion(group, 0, 3));
+    
+    if (targetCharacterId) {
+      // 针对特定角色播放
+      const model = characterModelsRef.current.get(targetCharacterId);
+      if (model) {
+        model.motion(group, 0, 3);
+      }
+    } else {
+      // 广播到所有模型
+      modelManager.forEachModel((m) => m.motion(group, 0, 3));
+    }
     setCurrentMotion(group);
   };
 
-  const applyExpression = (name: string) => {
+  const applyExpression = (name: string, targetCharacterId?: string) => {
     if (!modelData?.expressions?.length) return;
-    modelManager.forEachModel((m) => m.expression(name));
+    
+    if (targetCharacterId) {
+      // 针对特定角色应用
+      const model = characterModelsRef.current.get(targetCharacterId);
+      if (model) {
+        model.expression(name);
+      }
+    } else {
+      // 广播到所有模型
+      modelManager.forEachModel((m) => m.expression(name));
+    }
     setCurrentExpression(name);
   };
 
@@ -440,13 +460,13 @@ export default function Live2DView() {
     for (const c of motionClips) {
       if (t >= c.start && t < c.start + c.duration) {
         // 在片段持续时间内持续播放动作
-        playMotion(c.name);
+        playMotion(c.name, c.targetCharacter);
       }
     }
     for (const c of exprClips) {
       if (t >= c.start && t < c.start + c.duration) {
         // 在片段持续时间内持续应用表情
-        applyExpression(c.name);
+        applyExpression(c.name, c.targetCharacter);
       }
     }
 
