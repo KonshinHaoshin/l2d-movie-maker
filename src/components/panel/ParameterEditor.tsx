@@ -4,6 +4,26 @@ import type { Live2DModel } from "pixi-live2d-display";
 import type { ParameterKeyframe, ParameterTrack } from "../../types/parameterEditor";
 
 // 常见的 Live2D 参数（会被动态检测补充）
+// 参数分组
+const PARAM_GROUPS = {
+  eye: ["Eye", "eye", "EyeL", "EyeR", "Blink"],
+  mouth: ["Mouth", "mouth", "Lip", "lip"],
+  brow: ["Brow", "brow", "Eyebrow", "eyebrow"],
+  face: ["Face", "face", "Angle", "angle", "Head", "head"],
+  hair: ["Hair", "hair", "Front", "Side", "Back"],
+  body: ["Body", "body", "Breath", "breath", "Arm", "arm", "Hand", "hand"],
+  other: []
+};
+
+const getParamGroup = (paramId: string): string => {
+  for (const [group, keywords] of Object.entries(PARAM_GROUPS)) {
+    if (keywords.some(kw => paramId.includes(kw))) {
+      return group;
+    }
+  }
+  return "other";
+};
+
 const COMMON_PARAMS = [
   "ParamAngleX", "ParamAngleY", "ParamAngleZ",
   "ParamEyeLOpen", "ParamEyeLSmile", "ParamEyeROpen", "ParamEyeRSmile",
@@ -455,29 +475,61 @@ export function ParameterEditor({
             加载参数中... 或模型不支持
           </div>
         ) : (
-          parameters.map(param => (
-            <div 
-              key={param.id} 
-              className={`parameter-item ${selectedParam === param.id ? "selected" : ""}`}
-              onClick={() => selectParameter(param.id)}
-            >
-              <div className="parameter-name">
-                {param.name}
-                {isComposite && <span className="model-badge">#{param.modelIndex}</span>}
+          // 按分组显示参数
+          (() => {
+            // 分组
+            const grouped: Record<string, typeof parameters> = {};
+            parameters.forEach(p => {
+              const group = getParamGroup(p.id);
+              if (!grouped[group]) grouped[group] = [];
+              grouped[group].push(p);
+            });
+            
+            const groupLabels: Record<string, string> = {
+              eye: "👁️ 眼睛",
+              mouth: "👄 嘴巴",
+              brow: "🩹 眉毛",
+              face: "🎭 脸部",
+              hair: "💇 头发",
+              body: "🧘 身体",
+              other: "🔧 其他"
+            };
+            
+            return Object.entries(grouped).map(([group, params]) => (
+              <div key={group} className="parameter-group">
+                <div className="parameter-group-header">
+                  {groupLabels[group] || group}
+                </div>
+                {params.map(param => (
+                  <div 
+                    key={param.id} 
+                    className={`parameter-item ${selectedParam === param.id ? "selected" : ""}`}
+                    onClick={() => selectParameter(param.id)}
+                  >
+                    <div className="parameter-name">
+                      {param.name}
+                      {isComposite && <span className="model-badge">#{param.modelIndex}</span>}
+                    </div>
+                    <div className="parameter-control">
+                      <input
+                        type="range"
+                        min={param.min}
+                        max={param.max}
+                        step="0.01"
+                        value={param.value}
+                        onChange={(e) => handleSliderChange(param.id, parseFloat(e.target.value))}
+                        onMouseUp={(e) => handleSliderCommit(param.id, parseFloat((e.target as HTMLInputElement).value))}
+                        className="parameter-slider"
+                      />
+                      <span className="parameter-value">{param.value.toFixed(2)}</span>
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div className="parameter-control">
-                <input
-                  type="range"
-                  min={param.min}
-                  max={param.max}
-                  step="0.01"
-                  value={param.value}
-                  onChange={(e) => handleSliderChange(param.id, parseFloat(e.target.value))}
-                  onMouseUp={(e) => handleSliderCommit(param.id, parseFloat((e.target as HTMLInputElement).value))}
-                  className="parameter-slider"
-                />
-                <span className="parameter-value">{param.value.toFixed(2)}</span>
-              </div>
+            ));
+          })()
+        )}
+      </div>
             </div>
           ))
         )}

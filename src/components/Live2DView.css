@@ -1317,3 +1317,21 @@
 .keyframe-actions button:hover {
     background: #5a6268;
 }
+
+/* 参数分组 */
+.parameter-group {
+    margin-bottom: 10px;
+}
+
+.parameter-group-header {
+    font-size: 12px;
+    font-weight: 600;
+    color: #adb5bd;
+    padding: 6px 8px;
+    background: #2d3238;
+    border-radius: 4px;
+    margin-bottom: 5px;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
