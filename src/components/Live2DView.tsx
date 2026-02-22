@@ -121,7 +121,7 @@ export default function Live2DView() {
         appRef.current,
         character.id,
         modelUrl,
-        { x: character.x, y: character.y, scale: character.scale, opacity: character.opacity }
+        { x: character.x, y: character.y, scale: character.scale, opacity: character.opacity, enableDragging }
       );
       
       if (model) {

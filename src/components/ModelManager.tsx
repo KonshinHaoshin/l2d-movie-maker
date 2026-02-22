@@ -444,6 +444,7 @@ export default function ModelManager({
       y?: number;
       scale?: number;
       opacity?: number;
+      enableDragging?: boolean;
     }
   ): Promise<Live2DModel | null> => {
     const baseUrl = modelUrl.startsWith("http") ? modelUrl : (modelUrl.includes("%") ? modelUrl : encodeURI(modelUrl));
@@ -468,6 +469,11 @@ export default function ModelManager({
       
       // 添加到舞台
       app.stage.addChild(model as any);
+      
+      // 如果启用拖拽，使模型可拖动
+      if (options?.enableDragging !== false) {
+        makeDraggableModel(model);
+      }
       
       console.log(`[ModelManager] 角色模型加载成功: ${characterId}`);
       return model;
