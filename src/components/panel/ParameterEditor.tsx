@@ -143,19 +143,30 @@ export function ParameterEditor({
     // 如果提供了回调，使用回调设置参数
     if (onSetParameter && model) {
       const modelsToUpdate = isComposite ? [model, ...subModels] : [model];
-      modelsToUpdate.forEach(m => onSetParameter(m, paramId, value));
+      modelsToUpdate.forEach(m => {
+        if (m) onSetParameter(m, paramId, value);
+      });
     } else {
       // 否则使用原有的直接设置逻辑
       const modelsToUpdate = isComposite ? [model, ...subModels] : [model];
 
       modelsToUpdate.forEach((m) => {
+        if (!m) return;
         try {
-          const im = (m as any).internalModel;
+          // 改进类型推断
+          const modelAny = m as unknown as {
+            internalModel?: {
+              coreModel?: {
+                setParamFloat?: (id: string, val: number) => void;
+              }
+            }
+          };
+          const im = modelAny.internalModel;
           if (im?.coreModel?.setParamFloat) {
             im.coreModel.setParamFloat(paramId, value);
           }
-        } catch (e) {
-          // 忽略
+        } catch {
+          // 忽略错误
         }
       });
     }
