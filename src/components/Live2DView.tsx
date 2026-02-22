@@ -848,6 +848,8 @@ export default function Live2DView() {
           <ParameterEditor
             model={modelRef.current as any}
             isComposite={isCompositeRef.current}
+            subModels={modelManager.getSubModels()}
+            onParameterChange={modelManager.getAllSubModelParameters}
           />
         )}
       )}

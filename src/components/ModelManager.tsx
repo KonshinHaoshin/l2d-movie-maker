@@ -507,11 +507,86 @@ export default function ModelManager({
   return {
     loadAnyModel,
     loadCharacterModel,
+  // 获取子模型列表（用于 JSONL 复合模型）
+  const getSubModels = (): Live2DModel[] => {
+    if (groupContainerRef.current) {
+      return groupContainerRef.current.children as Live2DModel[];
+    }
+    return [];
+  };
+
+  // 获取模型参数信息
+  const getModelParameters = (model: Live2DModel): any[] => {
+    const params: any[] = [];
+    try {
+      const im = (model as any).internalModel;
+      if (!im?.coreModel) return params;
+      
+      const coreModel = im.coreModel;
+      
+      // 获取参数数量
+      const paramCount = coreModel.getParamCount?.() ?? 0;
+      
+      for (let i = 0; i < paramCount; i++) {
+        try {
+          const id = coreModel.getParamId?.(i) ?? `Param_${i}`;
+          const value = coreModel.getParamFloat?.(id) ?? 0;
+          const min = coreModel.getParamMinValue?.(id) ?? -1;
+          const max = coreModel.getParamMaxValue?.(id) ?? 1;
+          
+          params.push({
+            id,
+            name: id.replace(/^Param/, ""),
+            value,
+            min,
+            max,
+            type: 'float'
+          });
+        } catch (e) {
+          // 跳过无法读取的参数
+        }
+      }
+    } catch (e) {
+      console.warn("获取模型参数失败:", e);
+    }
+    return params;
+  };
+
+  // 获取所有子模型的参数（去重合并）
+  const getAllSubModelParameters = (): any[] => {
+    const paramsMap = new Map<string, any>();
+    const subModels = getSubModels();
+    
+    // 先获取主模型的参数
+    if (modelRef.current && !Array.isArray(modelRef.current)) {
+      const mainParams = getModelParameters(modelRef.current as Live2DModel);
+      mainParams.forEach(p => paramsMap.set(p.id, { ...p, modelIndex: 0 }));
+    }
+    
+    // 获取子模型参数
+    subModels.forEach((subModel, index) => {
+      const subParams = getModelParameters(subModel);
+      subParams.forEach(p => {
+        if (!paramsMap.has(p.id)) {
+          paramsMap.set(p.id, { ...p, modelIndex: index + 1 });
+        }
+      });
+    });
+    
+    return Array.from(paramsMap.values());
+  };
+
+  return {
+    loadAnyModel,
+    loadCharacterModel,
     unloadCharacterModel,
     updateCharacterModel,
     cleanupCurrentModel,
     forEachModel,
     isJsonl,
-    resolveRelativeFrom
+    resolveRelativeFrom,
+    getSubModels,
+    getModelParameters,
+    getAllSubModelParameters
   };
 } 

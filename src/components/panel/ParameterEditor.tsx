@@ -18,6 +18,7 @@ interface ParameterEditorProps {
   model: Live2DModel | null;
   isComposite: boolean;
   subModels?: Live2DModel[];
+  onParameterChange?: () => any[];
   onTrackChange?: (tracks: ParameterTrack[]) => void;
 }
 
@@ -25,6 +26,7 @@ export function ParameterEditor({
   model, 
   isComposite, 
   subModels = [],
+  onParameterChange,
   onTrackChange 
 }: ParameterEditorProps) {
   const [parameters, setParameters] = useState<any[]>([]);
@@ -41,6 +43,16 @@ export function ParameterEditor({
 
   // 检测模型参数
   const detectParameters = useCallback(() => {
+    // 如果提供了回调，使用回调获取参数
+    if (onParameterChange) {
+      const params = onParameterChange();
+      setParameters(params);
+      // 保存原始值
+      params.forEach(p => originalValuesRef.current.set(p.id, p.value));
+      return;
+    }
+
+    // 否则使用原有的检测逻辑
     if (!model) return;
 
     const params: any[] = [];
@@ -94,7 +106,7 @@ export function ParameterEditor({
     });
 
     setParameters(params);
-  }, [model, isComposite, subModels]);
+  }, [model, isComposite, subModels, onParameterChange]);
 
   // 初始化检测参数
   useEffect(() => {
