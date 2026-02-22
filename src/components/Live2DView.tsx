@@ -69,6 +69,7 @@ export default function Live2DView() {
   // —— 时间线 —— //
   const [motionClips, setMotionClips] = useState<Clip[]>([]);
   const [exprClips, setExprClips] = useState<Clip[]>([]);
+  const [paramClips, setParamClips] = useState<Clip[]>([]); // 参数关键帧 clips
   const [audioClips, setAudioClips] = useState<Clip[]>([]); // 新增音频轨
   const [playhead, setPlayhead] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -332,6 +333,19 @@ export default function Live2DView() {
     setExprClips((prev) => [...prev, { id: crypto.randomUUID(), name, start: nextEnd(prev), duration: exprDur }]);
   };
 
+  // 添加参数关键帧 clip
+  const addParamClip = (paramId: string, paramValue: number, start?: number) => {
+    const clip: Clip = {
+      id: crypto.randomUUID(),
+      name: paramId,
+      start: start ?? nextEnd(paramClips),
+      duration: 0.1,
+      paramId,
+      paramValue
+    };
+    setParamClips((prev) => [...prev, clip]);
+  };
+
   // 新增音频导入功能
   const addAudioClip = async () => {
     try {
@@ -410,7 +424,12 @@ export default function Live2DView() {
     }
   };
 
-  const timelineLength = Math.max(nextEnd(motionClips), nextEnd(exprClips), nextEnd(audioClips));
+  const timelineLength = Math.max(
+    nextEnd(motionClips), 
+    nextEnd(exprClips), 
+    nextEnd(audioClips),
+    nextEnd(paramClips)
+  );
 
   const tick = (ts: number) => {
     if (startTsRef.current == null) startTsRef.current = ts;
@@ -434,6 +453,24 @@ export default function Live2DView() {
     // 音频播放和动画处理
     audioManager.playAudioAtTime(t);
     audioManager.processAudioAnimation(t);
+
+    // 应用参数关键帧
+    for (const c of paramClips) {
+      if (t >= c.start && t < c.start + c.duration) {
+        if (c.paramId && c.paramValue !== undefined) {
+          modelManager.forEachModel((m: any) => {
+            try {
+              const im = m.internalModel;
+              if (im?.coreModel?.setParamFloat) {
+                im.coreModel.setParamFloat(c.paramId!, c.paramValue!);
+              }
+            } catch (e) {
+              // 忽略
+            }
+          });
+        }
+      }
+    }
 
     if (t >= timelineLength) {
       stopPlayback();
@@ -859,12 +896,14 @@ export default function Live2DView() {
       <Timeline
         motionClips={motionClips}
         exprClips={exprClips}
+        paramClips={paramClips}
         audioClips={audioClips}
         playheadSec={playhead}
         onChangeClip={changeClip}
         onRemoveClip={(track, id) => {
           if (track === "motion") setMotionClips(prev => prev.filter(c => c.id !== id));
           else if (track === "expr") setExprClips(prev => prev.filter(c => c.id !== id));
+          else if (track === "param") setParamClips(prev => prev.filter(c => c.id !== id));
           else if (track === "audio") {
             setAudioClips(prev => prev.filter(c => c.id !== id));
             // 清理音频引用
