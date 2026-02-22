@@ -232,6 +232,77 @@ export function ParameterEditor({
   };
 
   // 恢复所有参数
+  // 保存预设
+  const savePreset = () => {
+    const presetName = prompt("输入预设名称:");
+    if (!presetName) return;
+
+    const preset = {
+      name: presetName,
+      timestamp: Date.now(),
+      parameters: parameters.map(p => ({
+        id: p.id,
+        value: p.value
+      }))
+    };
+
+    // 保存到 localStorage
+    const presets = JSON.parse(localStorage.getItem("l2d_param_presets") || "[]");
+    presets.push(preset);
+    localStorage.setItem("l2d_param_presets", JSON.stringify(presets));
+
+    alert(`预设 "${presetName}" 已保存！`);
+  };
+
+  // 加载预设
+  const loadPreset = () => {
+    const presets = JSON.parse(localStorage.getItem("l2d_param_presets") || "[]");
+    if (presets.length === 0) {
+      alert("没有保存的预设");
+      return;
+    }
+
+    const presetNames = presets.map((p: any) => p.name).join("\n");
+    const selected = prompt(`选择预设名称:\n${presetNames}\n\n输入名称:`);
+    if (!selected) return;
+
+    const preset = presets.find((p: any) => p.name === selected);
+    if (!preset) {
+      alert("未找到该预设");
+      return;
+    }
+
+    // 应用预设
+    preset.parameters.forEach((p: any) => {
+      setParameterValue(p.id, p.value);
+    });
+
+    // 更新原始值
+    preset.parameters.forEach((p: any) => {
+      originalValuesRef.current.set(p.id, p.value);
+    });
+
+    alert(`已加载预设 "${selected}"`);
+  };
+
+  // 删除预设
+  const deletePreset = () => {
+    const presets = JSON.parse(localStorage.getItem("l2d_param_presets") || "[]");
+    if (presets.length === 0) {
+      alert("没有保存的预设");
+      return;
+    }
+
+    const presetNames = presets.map((p: any) => p.name).join("\n");
+    const selected = prompt(`输入要删除的预设名称:\n${presetNames}`);
+    if (!selected) return;
+
+    const newPresets = presets.filter((p: any) => p.name !== selected);
+    localStorage.setItem("l2d_param_presets", JSON.stringify(newPresets));
+
+    alert(`已删除预设 "${selected}"`);
+  };
+
   const restoreAllParameters = useCallback(() => {
     originalValuesRef.current.forEach((value, paramId) => {
       setParameterValue(paramId, value);
@@ -255,8 +326,11 @@ export function ParameterEditor({
           <button onClick={() => setShowCurves(!showCurves)}>
             {showCurves ? "隐藏曲线" : "显示曲线"}
           </button>
-          <button onClick={detectParameters}>🔄 刷新参数</button>
-          <button onClick={restoreAllParameters}>↩️ 恢复默认</button>
+          <button onClick={detectParameters}>🔄</button>
+          <button onClick={restoreAllParameters}>↩️</button>
+          <button onClick={savePreset}>💾</button>
+          <button onClick={loadPreset}>📂</button>
+          <button onClick={deletePreset}>🗑️</button>
         </div>
       </div>
 
