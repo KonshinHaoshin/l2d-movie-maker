@@ -1083,3 +1083,212 @@
     background: #0d6efd;
     color: #fff;
 }
+
+/* 参数编辑器 */
+.parameter-editor {
+    position: absolute;
+    top: 50px;
+    left: 0;
+    width: 320px;
+    max-height: calc(100vh - 100px);
+    background: rgba(33, 37, 41, 0.95);
+    color: #fff;
+    padding: 15px;
+    border-radius: 0 8px 8px 0;
+    overflow-y: auto;
+    z-index: 99;
+}
+
+.parameter-editor-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.parameter-editor-header h3 {
+    margin: 0;
+    font-size: 16px;
+}
+
+.parameter-editor-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.parameter-editor-actions button {
+    background: #495057;
+    color: #fff;
+    border: none;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+}
+
+.parameter-editor-actions button:hover {
+    background: #5a6268;
+}
+
+/* 预览时间轴 */
+.parameter-preview-timeline {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+    background: #343a40;
+    border-radius: 4px;
+    margin-bottom: 15px;
+}
+
+.parameter-preview-timeline button {
+    background: #0d6efd;
+    color: #fff;
+    border: none;
+    padding: 4px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.preview-time {
+    font-size: 12px;
+    min-width: 40px;
+}
+
+.preview-slider {
+    flex: 1;
+    height: 4px;
+}
+
+/* 参数列表 */
+.parameter-list {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.parameter-list-empty {
+    text-align: center;
+    color: #6c757d;
+    padding: 20px;
+    font-size: 13px;
+}
+
+.parameter-item {
+    padding: 8px;
+    background: #343a40;
+    border-radius: 4px;
+    margin-bottom: 5px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.parameter-item:hover {
+    background: #495057;
+}
+
+.parameter-item.selected {
+    background: #0d6efd;
+}
+
+.parameter-name {
+    font-size: 12px;
+    font-weight: 500;
+    margin-bottom: 4px;
+    display: flex;
+    justify-content: space-between;
+}
+
+.model-badge {
+    font-size: 10px;
+    background: #6c757d;
+    padding: 2px 4px;
+    border-radius: 2px;
+}
+
+.parameter-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.parameter-slider {
+    flex: 1;
+    height: 4px;
+    -webkit-appearance: none;
+    background: #5c5f66;
+    border-radius: 2px;
+}
+
+.parameter-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px;
+    height: 12px;
+    background: #0d6efd;
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+.parameter-value {
+    font-size: 11px;
+    min-width: 40px;
+    text-align: right;
+    color: #adb5bd;
+}
+
+/* 曲线编辑器 */
+.parameter-curves {
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid #495057;
+}
+
+.parameter-curves h4 {
+    margin: 0 0 10px 0;
+    font-size: 14px;
+}
+
+.curves-empty {
+    text-align: center;
+    color: #6c757d;
+    font-size: 12px;
+    padding: 10px;
+}
+
+.curve-track {
+    background: #343a40;
+    border-radius: 4px;
+    padding: 8px;
+    margin-bottom: 8px;
+}
+
+.curve-header {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    margin-bottom: 5px;
+}
+
+.keyframe-count {
+    color: #adb5bd;
+}
+
+.curve-canvas {
+    height: 50px;
+}
+
+.curve-svg {
+    width: 100%;
+    height: 100%;
+    background: #212529;
+    border-radius: 2px;
+}
+
+.curve-svg circle {
+    cursor: pointer;
+}
+
+.curve-svg circle:hover {
+    r: 4;
+    fill: #dc3545;
+}

@@ -8,6 +8,7 @@ import { parseMtn } from "../utils/parseMtn";
 import "./Live2DView.css";
 import ControlPanel from "./panel/ControlPanel";
 import { CharacterPanel } from "./panel/CharacterPanel";
+import { ParameterEditor } from "./panel/ParameterEditor";
 import RecordingBounds from "./RecordingBounds";
 import ExportToolbar from "./ExportToolbar";
 import ModelManager from "./ModelManager";
@@ -102,6 +103,9 @@ export default function Live2DView() {
   const [characters, setCharacters] = useState<Character[]>([]);
   const [activeCharacterId, setActiveCharacterId] = useState<string | null>(null);
   const [showCharacterPanel, setShowCharacterPanel] = useState(false);
+  
+  // 编辑器模式: "timeline" | "parameter"
+  const [editorMode, setEditorMode] = useState<"timeline" | "parameter">("timeline");
 
   // 角色操作函数
   const handleAddCharacter = async (character: Character) => {
@@ -803,19 +807,25 @@ export default function Live2DView() {
           currentAudioLevel={currentAudioLevel}
         />
 
-        {/* 角色管理面板切换 */}
+        {/* 面板切换按钮 */}
         <div className="panel-toggle-buttons">
           <button
-            className={`panel-toggle-btn ${!showCharacterPanel ? "active" : ""}`}
-            onClick={() => setShowCharacterPanel(false)}
+            className={`panel-toggle-btn ${!showCharacterPanel && editorMode === "timeline" ? "active" : ""}`}
+            onClick={() => { setShowCharacterPanel(false); setEditorMode("timeline"); }}
           >
             🎛️ 模型
           </button>
           <button
             className={`panel-toggle-btn ${showCharacterPanel ? "active" : ""}`}
-            onClick={() => setShowCharacterPanel(true)}
+            onClick={() => { setShowCharacterPanel(true); setEditorMode("timeline"); }}
           >
             🎭 角色
+          </button>
+          <button
+            className={`panel-toggle-btn ${editorMode === "parameter" ? "active" : ""}`}
+            onClick={() => { setShowCharacterPanel(false); setEditorMode("parameter"); }}
+          >
+            🎢 参数
           </button>
         </div>
 
@@ -830,6 +840,14 @@ export default function Live2DView() {
             onUpdateCharacter={handleUpdateCharacter}
             onImportWebGAL={handleImportWebGAL}
             modelList={modelList}
+          />
+        )}
+
+        {/* 参数编辑器面板 */}
+        {editorMode === "parameter" && (
+          <ParameterEditor
+            model={modelRef.current as any}
+            isComposite={isCompositeRef.current}
           />
         )}
       )}
