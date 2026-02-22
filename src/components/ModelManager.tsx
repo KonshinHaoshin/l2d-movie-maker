@@ -434,8 +434,81 @@ export default function ModelManager({
     }
   };
 
+  // 加载角色模型（用于多角色模式）
+  const loadCharacterModel = async (
+    app: PIXI.Application,
+    characterId: string,
+    modelUrl: string,
+    options?: {
+      x?: number;
+      y?: number;
+      scale?: number;
+      opacity?: number;
+    }
+  ): Promise<Live2DModel | null> => {
+    const baseUrl = modelUrl.startsWith("http") ? modelUrl : (modelUrl.includes("%") ? modelUrl : encodeURI(modelUrl));
+    
+    try {
+      console.log(`[ModelManager] 加载角色模型: ${characterId}`, baseUrl);
+      
+      let model: Live2DModel;
+      if (isJsonl(baseUrl)) {
+        // JSONL 复合模型
+        model = await Live2DModel.from(baseUrl) as Live2DModel;
+      } else {
+        // 单模型
+        model = await Live2DModel.from(baseUrl) as Live2DModel;
+      }
+      
+      // 设置位置和缩放
+      if (options?.x !== undefined) model.position.x = options.x;
+      if (options?.y !== undefined) model.position.y = options.y;
+      if (options?.scale !== undefined) model.scale.set(options.scale);
+      if (options?.opacity !== undefined) model.alpha = options.opacity;
+      
+      // 添加到舞台
+      app.stage.addChild(model as any);
+      
+      console.log(`[ModelManager] 角色模型加载成功: ${characterId}`);
+      return model;
+    } catch (e) {
+      console.error(`[ModelManager] 角色模型加载失败: ${characterId}`, e);
+      return null;
+    }
+  };
+
+  // 卸载角色模型
+  const unloadCharacterModel = (app: PIXI.Application, characterId: string, model: Live2DModel) => {
+    try {
+      app.stage.removeChild(model as any);
+      model.destroy?.({ children: true, texture: true, baseTexture: true });
+      console.log(`[ModelManager] 角色模型已卸载: ${characterId}`);
+    } catch (e) {
+      console.warn(`[ModelManager] 卸载角色模型失败: ${characterId}`, e);
+    }
+  };
+
+  // 更新角色模型属性
+  const updateCharacterModel = (
+    model: Live2DModel,
+    updates: {
+      x?: number;
+      y?: number;
+      scale?: number;
+      opacity?: number;
+    }
+  ) => {
+    if (updates.x !== undefined) model.position.x = updates.x;
+    if (updates.y !== undefined) model.position.y = updates.y;
+    if (updates.scale !== undefined) model.scale.set(updates.scale);
+    if (updates.opacity !== undefined) model.alpha = updates.opacity;
+  };
+
   return {
     loadAnyModel,
+    loadCharacterModel,
+    unloadCharacterModel,
+    updateCharacterModel,
     cleanupCurrentModel,
     forEachModel,
     isJsonl,

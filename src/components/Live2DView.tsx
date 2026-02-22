@@ -40,6 +40,9 @@ export default function Live2DView() {
   // 允许保存单模型或复合的子模型数组
   const modelRef = useRef<Live2DModel | Live2DModel[] | null>(null);
   const appRef = useRef<PIXI.Application | null>(null);
+  
+  // 多角色模型引用 Map
+  const characterModelsRef = useRef<Map<string, Live2DModel>>(new Map());
 
   // 复合（.jsonl）时的容器与标记、MTN 解析基准目录
   const groupContainerRef = useRef<PIXI.Container | null>(null);
@@ -102,14 +105,67 @@ export default function Live2DView() {
 
   // 角色操作函数
   const handleAddCharacter = async (character: Character) => {
-    // 添加角色并加载模型
+    // 添加角色
     const newChars = [...characters, character];
     setCharacters(newChars);
     
-    // 如果是第一个角色，自动设置为活动角色并加载
-    if (newChars.length === 1) {
-      setActiveCharacterId(character.id);
-      setSelectedModel(character.modelPath);
+    // 如果有 appRef，加载角色模型
+    if (appRef.current && assetBase) {
+      const modelUrl = `${assetBase}/${character.modelPath}`;
+      const model = await modelManager.loadCharacterModel(
+        appRef.current,
+        character.id,
+        modelUrl,
+        { x: character.x, y: character.y, scale: character.scale, opacity: character.opacity }
+      );
+      
+      if (model) {
+        characterModelsRef.current.set(character.id, model);
+        
+        // 按 zIndex 排序
+        updateCharacterZIndex();
+        
+        // 如果是第一个角色，设置为活动角色
+        if (newChars.length === 1) {
+          setActiveCharacterId(character.id);
+          modelRef.current = model;
+        }
+      }
+    } else {
+      // 如果没有 appRef，只添加角色
+      if (newChars.length === 1) {
+        setActiveCharacterId(character.id);
+        setSelectedModel(character.modelPath);
+      }
+    }
+  };
+
+  // 更新角色 zIndex 排序
+  const updateCharacterZIndex = () => {
+    if (!appRef.current) return;
+    
+    const sorted = [...characters].sort((a, b) => a.zIndex - b.zIndex);
+    
+    sorted.forEach((char, index) => {
+      const model = characterModelsRef.current.get(char.id);
+      if (model) {
+        appRef.current!.stage.setChildIndex(model as any, index);
+      }
+    });
+  };
+
+  const handleRemoveCharacter = (id: string) => {
+    // 先卸载模型
+    const model = characterModelsRef.current.get(id);
+    if (model && appRef.current) {
+      modelManager.unloadCharacterModel(appRef.current, id, model);
+      characterModelsRef.current.delete(id);
+    }
+    
+    setCharacters(characters.filter(c => c.id !== id));
+    if (activeCharacterId === id) {
+      setActiveCharacterId(null);
+      modelRef.current = null;
     }
   };
 
@@ -123,28 +179,19 @@ export default function Live2DView() {
   const handleUpdateCharacter = (id: string, updates: Partial<Character>) => {
     setCharacters(characters.map(c => c.id === id ? { ...c, ...updates } : c));
     
-    // 如果更新的是当前活动角色，同步更新模型属性
-    if (id === activeCharacterId && modelRef.current) {
-      const char = characters.find(c => c.id === id);
-      if (!char) return;
+    // 同步更新模型属性
+    const model = characterModelsRef.current.get(id);
+    if (model) {
+      modelManager.updateCharacterModel(model, {
+        x: updates.x,
+        y: updates.y,
+        scale: updates.scale,
+        opacity: updates.opacity
+      });
       
-      const applyToModel = (model: any) => {
-        if (updates.x !== undefined || updates.y !== undefined) {
-          model.position.x = (updates.x ?? char.x);
-          model.position.y = (updates.y ?? char.y);
-        }
-        if (updates.scale !== undefined) {
-          model.scale.set(updates.scale ?? char.scale);
-        }
-        if (updates.opacity !== undefined) {
-          model.alpha = updates.opacity ?? char.opacity;
-        }
-      };
-      
-      if (Array.isArray(modelRef.current)) {
-        modelRef.current.forEach(applyToModel);
-      } else {
-        applyToModel(modelRef.current);
+      // 如果 zIndex 变化，更新渲染顺序
+      if (updates.zIndex !== undefined) {
+        updateCharacterZIndex();
       }
     }
   };
@@ -155,7 +202,30 @@ export default function Live2DView() {
     if (id) {
       const char = characters.find(c => c.id === id);
       if (char) {
-        setSelectedModel(char.modelPath);
+        // 检查模型是否已加载
+        let model = characterModelsRef.current.get(id);
+        
+        if (!model && appRef.current && assetBase) {
+          // 尚未加载，加载模型
+          const modelUrl = `${assetBase}/${char.modelPath}`;
+          modelManager.loadCharacterModel(
+            appRef.current,
+            char.id,
+            modelUrl,
+            { x: char.x, y: char.y, scale: char.scale, opacity: char.opacity }
+          ).then(loadedModel => {
+            if (loadedModel) {
+              characterModelsRef.current.set(id, loadedModel);
+              modelRef.current = loadedModel;
+              updateCharacterZIndex();
+            }
+          });
+        } else if (model) {
+          modelRef.current = model;
+        } else {
+          // 没有 appRef，回退到旧的单模型方式
+          setSelectedModel(char.modelPath);
+        }
       }
     }
   };
