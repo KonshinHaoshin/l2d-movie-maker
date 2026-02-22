@@ -303,6 +303,64 @@ export function ParameterEditor({
     alert(`已删除预设 "${selected}"`);
   };
 
+  // 导出关键帧为 JSON
+  const exportKeyframes = () => {
+    if (tracks.length === 0) {
+      alert("没有关键帧可导出");
+      return;
+    }
+
+    const exportData = {
+      version: 1,
+      exportTime: Date.now(),
+      tracks: tracks
+    };
+
+    const json = JSON.stringify(exportData, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `keyframes_${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // 导入关键帧 JSON
+  const importKeyframes = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json";
+    input.onchange = (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const data = JSON.parse(ev.target?.result as string);
+          if (data.tracks && Array.isArray(data.tracks)) {
+            setTracks(data.tracks);
+            alert(`导入了 ${data.tracks.length} 条轨道`);
+          } else {
+            alert("无效的关键帧文件");
+          }
+        } catch (err) {
+          alert("解析文件失败: " + err);
+        }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  };
+
+  // 清除所有关键帧
+  const clearAllKeyframes = () => {
+    if (confirm("确定清除所有关键帧?")) {
+      setTracks([]);
+    }
+  };
+
   const restoreAllParameters = useCallback(() => {
     originalValuesRef.current.forEach((value, paramId) => {
       setParameterValue(paramId, value);
@@ -333,6 +391,15 @@ export function ParameterEditor({
           <button onClick={deletePreset}>🗑️</button>
         </div>
       </div>
+
+      {/* 关键帧操作栏 */}
+      {showCurves && (
+        <div className="keyframe-actions">
+          <button onClick={exportKeyframes}>⬇️ 导出</button>
+          <button onClick={importKeyframes}>⬆️ 导入</button>
+          <button onClick={clearAllKeyframes}>🗑️ 清除</button>
+        </div>
+      )}
 
       {/* 预览时间轴 */}
       <div className="parameter-preview-timeline">

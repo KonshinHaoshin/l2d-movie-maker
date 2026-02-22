@@ -1292,3 +1292,28 @@
     r: 4;
     fill: #dc3545;
 }
+
+/* 关键帧操作栏 */
+.keyframe-actions {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+    padding: 8px;
+    background: #343a40;
+    border-radius: 4px;
+}
+
+.keyframe-actions button {
+    flex: 1;
+    background: #495057;
+    color: #fff;
+    border: none;
+    padding: 6px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 11px;
+}
+
+.keyframe-actions button:hover {
+    background: #5a6268;
+}
