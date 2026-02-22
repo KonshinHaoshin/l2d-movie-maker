@@ -7,6 +7,7 @@ import type { Clip, TrackKind } from "./timeline/types";
 import { parseMtn } from "../utils/parseMtn";
 import "./Live2DView.css";
 import ControlPanel from "./panel/ControlPanel";
+import { CharacterPanel } from "./panel/CharacterPanel";
 import RecordingBounds from "./RecordingBounds";
 import ExportToolbar from "./ExportToolbar";
 import ModelManager from "./ModelManager";
@@ -21,6 +22,9 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { appCacheDir, BaseDirectory, join } from "@tauri-apps/api/path";
 import { writeFile } from "@tauri-apps/plugin-fs";
 import { isVp9AlphaSupported } from "../utils/recorder";
+import { WebGALParser } from "../utils/webgalParser";
+import type { Character } from "../types/character";
+import { defaultCharacter } from "../types/character";
 
 interface Motion { name: string; file: string; }
 interface Expression { name: string; file: string; }
@@ -90,7 +94,54 @@ export default function Live2DView() {
    
   // —— 录制质量设置 —— //
   const [recordingQuality, setRecordingQuality] = useState<"low" | "medium" | "high">("medium");
-  
+
+  // —— 角色管理 —— //
+  const [characters, setCharacters] = useState<Character[]>([]);
+  const [activeCharacterId, setActiveCharacterId] = useState<string | null>(null);
+  const [showCharacterPanel, setShowCharacterPanel] = useState(false);
+
+  // 角色操作函数
+  const handleAddCharacter = (character: Character) => {
+    setCharacters([...characters, character]);
+  };
+
+  const handleRemoveCharacter = (id: string) => {
+    setCharacters(characters.filter(c => c.id !== id));
+    if (activeCharacterId === id) {
+      setActiveCharacterId(null);
+    }
+  };
+
+  const handleUpdateCharacter = (id: string, updates: Partial<Character>) => {
+    setCharacters(characters.map(c => c.id === id ? { ...c, ...updates } : c));
+  };
+
+  const handleImportWebGAL = (commands: any[]) => {
+    // 将 WebGAL 命令转换为 clips 并添加到时间线
+    const parser = new WebGALParser();
+    // 这里需要获取当前选中角色的 ID
+    const targetCharId = activeCharacterId || "default";
+    const clips = parser.commandsToClips(commands, targetCharId);
+    
+    // 添加到对应的时间线轨道
+    clips.forEach(clip => {
+      if (clip.kind === "model") {
+        // 切换模型
+        setSelectedModel(clip.modelUrl);
+      } else if (clip.kind === "motion") {
+        // 添加动作 clip
+        addMotionClip(clip.name);
+      } else if (clip.kind === "expression") {
+        // 添加表情 clip
+        addExprClip(clip.name);
+      } else if (clip.kind === "audio") {
+        // 添加音频 clip
+        // 需要实现 addAudioClipWithTime 函数
+      }
+    });
+    
+    alert(`已导入 ${clips.length} 个时间线片段`);
+  };
 
 
   // 初始化管理器
@@ -637,6 +688,36 @@ export default function Live2DView() {
           onSetPlayhead={setPlayheadSec}
           currentAudioLevel={currentAudioLevel}
         />
+
+        {/* 角色管理面板切换 */}
+        <div className="panel-toggle-buttons">
+          <button
+            className={`panel-toggle-btn ${!showCharacterPanel ? "active" : ""}`}
+            onClick={() => setShowCharacterPanel(false)}
+          >
+            🎛️ 模型
+          </button>
+          <button
+            className={`panel-toggle-btn ${showCharacterPanel ? "active" : ""}`}
+            onClick={() => setShowCharacterPanel(true)}
+          >
+            🎭 角色
+          </button>
+        </div>
+
+        {/* 角色管理面板 */}
+        {showCharacterPanel && (
+          <CharacterPanel
+            characters={characters}
+            activeCharacterId={activeCharacterId}
+            onAddCharacter={handleAddCharacter}
+            onRemoveCharacter={handleRemoveCharacter}
+            onSelectCharacter={setActiveCharacterId}
+            onUpdateCharacter={handleUpdateCharacter}
+            onImportWebGAL={handleImportWebGAL}
+            modelList={modelList}
+          />
+        )}
       )}
 
       {/* 时间线 */}

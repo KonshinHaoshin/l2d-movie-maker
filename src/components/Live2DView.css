@@ -846,3 +846,240 @@
     display: block;
 }
 
+
+/* 角色管理面板 */
+.panel-toggle-buttons {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    display: flex;
+    gap: 5px;
+    z-index: 100;
+}
+
+.panel-toggle-btn {
+    background: #495057;
+    color: #fff;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px 4px 0 0;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background-color 0.2s;
+}
+
+.panel-toggle-btn.active {
+    background: #0d6efd;
+}
+
+.panel-toggle-btn:hover {
+    background: #0b5ed7;
+}
+
+.character-panel {
+    position: absolute;
+    top: 50px;
+    left: 0;
+    width: 280px;
+    max-height: calc(100vh - 100px);
+    background: rgba(33, 37, 41, 0.95);
+    color: #fff;
+    padding: 15px;
+    border-radius: 0 8px 8px 0;
+    overflow-y: auto;
+    z-index: 99;
+}
+
+.character-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.character-panel-header h3 {
+    margin: 0;
+    font-size: 16px;
+}
+
+.character-panel-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.character-panel-actions button {
+    background: #0d6efd;
+    color: #fff;
+    border: none;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.character-list {
+    margin-bottom: 15px;
+}
+
+.character-list-empty {
+    color: #6c757d;
+    text-align: center;
+    padding: 20px;
+    font-size: 13px;
+}
+
+.character-item {
+    display: flex;
+    align-items: center;
+    padding: 8px 10px;
+    background: #343a40;
+    border-radius: 4px;
+    margin-bottom: 5px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.character-item:hover {
+    background: #495057;
+}
+
+.character-item.active {
+    background: #0d6efd;
+}
+
+.character-name {
+    flex: 1;
+    font-weight: 500;
+}
+
+.character-path {
+    font-size: 11px;
+    color: #adb5bd;
+    margin-left: 8px;
+}
+
+.character-delete {
+    background: none;
+    border: none;
+    color: #dc3545;
+    cursor: pointer;
+    padding: 2px 6px;
+    font-size: 14px;
+    opacity: 0.6;
+}
+
+.character-delete:hover {
+    opacity: 1;
+}
+
+.character-editor {
+    background: #343a40;
+    padding: 10px;
+    border-radius: 4px;
+}
+
+.character-editor h4 {
+    margin: 0 0 10px 0;
+    font-size: 14px;
+    color: #adb5bd;
+}
+
+.character-editor-field {
+    display: flex;
+    align-items: center;
+    margin-bottom: 8px;
+    gap: 8px;
+}
+
+.character-editor-field label {
+    width: 50px;
+    font-size: 12px;
+    color: #adb5bd;
+}
+
+.character-editor-field input,
+.character-editor-field select {
+    flex: 1;
+    padding: 4px 8px;
+    border: 1px solid #495057;
+    border-radius: 4px;
+    background: #212529;
+    color: #fff;
+    font-size: 12px;
+}
+
+.character-editor-row {
+    display: flex;
+    gap: 10px;
+}
+
+.character-editor-row .character-editor-field {
+    flex: 1;
+}
+
+/* WebGAL 导入弹窗 */
+.webgal-import-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.webgal-import-content {
+    background: #212529;
+    padding: 20px;
+    border-radius: 8px;
+    width: 90%;
+    max-width: 500px;
+}
+
+.webgal-import-content h4 {
+    margin: 0 0 15px 0;
+}
+
+.webgal-import-content textarea {
+    width: 100%;
+    background: #343a40;
+    color: #fff;
+    border: 1px solid #495057;
+    border-radius: 4px;
+    padding: 10px;
+    font-family: monospace;
+    resize: vertical;
+}
+
+.webgal-error {
+    color: #dc3545;
+    font-size: 12px;
+    margin: 10px 0;
+}
+
+.webgal-import-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.webgal-import-actions button {
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    border: none;
+}
+
+.webgal-import-actions button:not(.primary) {
+    background: #6c757d;
+    color: #fff;
+}
+
+.webgal-import-actions button.primary {
+    background: #0d6efd;
+    color: #fff;
+}
