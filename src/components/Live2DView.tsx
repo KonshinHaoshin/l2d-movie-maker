@@ -86,6 +86,7 @@ export default function Live2DView() {
   // —— 用户自定义录制范围 —— //
   const [customRecordingBounds, setCustomRecordingBounds] = useState({ x: 0, y: 0, width: 800, height: 600 });
   const [showRecordingBounds, setShowRecordingBounds] = useState(false);
+  const [enableModelBoundsRecording, setEnableModelBoundsRecording] = useState(false);
    
   // —— 录制质量设置 —— //
   const [recordingQuality, setRecordingQuality] = useState<"low" | "medium" | "high">("medium");
@@ -306,6 +307,8 @@ export default function Live2DView() {
     exprClips,
     audioClips,
     recordingQuality,
+    customRecordingBounds,
+    enableModelBoundsRecording,
     setRecState,
     setRecordingTime,
     setRecordingProgress,
@@ -678,6 +681,8 @@ export default function Live2DView() {
         setShowRecordingBounds={setShowRecordingBounds}
         customRecordingBounds={customRecordingBounds}
         setCustomRecordingBounds={setCustomRecordingBounds}
+        enableModelBoundsRecording={enableModelBoundsRecording}
+        setEnableModelBoundsRecording={setEnableModelBoundsRecording}
         recordingQuality={recordingQuality}
         setRecordingQuality={setRecordingQuality}
         transparentBg={transparentBg}
