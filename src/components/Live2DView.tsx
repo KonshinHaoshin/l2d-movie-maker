@@ -101,8 +101,16 @@ export default function Live2DView() {
   const [showCharacterPanel, setShowCharacterPanel] = useState(false);
 
   // 角色操作函数
-  const handleAddCharacter = (character: Character) => {
-    setCharacters([...characters, character]);
+  const handleAddCharacter = async (character: Character) => {
+    // 添加角色并加载模型
+    const newChars = [...characters, character];
+    setCharacters(newChars);
+    
+    // 如果是第一个角色，自动设置为活动角色并加载
+    if (newChars.length === 1) {
+      setActiveCharacterId(character.id);
+      setSelectedModel(character.modelPath);
+    }
   };
 
   const handleRemoveCharacter = (id: string) => {
@@ -114,6 +122,42 @@ export default function Live2DView() {
 
   const handleUpdateCharacter = (id: string, updates: Partial<Character>) => {
     setCharacters(characters.map(c => c.id === id ? { ...c, ...updates } : c));
+    
+    // 如果更新的是当前活动角色，同步更新模型属性
+    if (id === activeCharacterId && modelRef.current) {
+      const char = characters.find(c => c.id === id);
+      if (!char) return;
+      
+      const applyToModel = (model: any) => {
+        if (updates.x !== undefined || updates.y !== undefined) {
+          model.position.x = (updates.x ?? char.x);
+          model.position.y = (updates.y ?? char.y);
+        }
+        if (updates.scale !== undefined) {
+          model.scale.set(updates.scale ?? char.scale);
+        }
+        if (updates.opacity !== undefined) {
+          model.alpha = updates.opacity ?? char.opacity;
+        }
+      };
+      
+      if (Array.isArray(modelRef.current)) {
+        modelRef.current.forEach(applyToModel);
+      } else {
+        applyToModel(modelRef.current);
+      }
+    }
+  };
+
+  // 当选择角色时，加载对应模型
+  const handleSelectCharacter = (id: string | null) => {
+    setActiveCharacterId(id);
+    if (id) {
+      const char = characters.find(c => c.id === id);
+      if (char) {
+        setSelectedModel(char.modelPath);
+      }
+    }
   };
 
   const handleImportWebGAL = (commands: any[]) => {
@@ -712,7 +756,7 @@ export default function Live2DView() {
             activeCharacterId={activeCharacterId}
             onAddCharacter={handleAddCharacter}
             onRemoveCharacter={handleRemoveCharacter}
-            onSelectCharacter={setActiveCharacterId}
+            onSelectCharacter={handleSelectCharacter}
             onUpdateCharacter={handleUpdateCharacter}
             onImportWebGAL={handleImportWebGAL}
             modelList={modelList}
