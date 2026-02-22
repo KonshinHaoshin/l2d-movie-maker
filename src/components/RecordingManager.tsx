@@ -186,82 +186,130 @@ export default function RecordingManager({
 
       // 获取部件信息
       let partIds: string[] = [];
+      let partNames: string[] = []; // 存储部件的显示名称
       let partCount = 0;
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const coreModel = internalModel.coreModel as any;
       
       // 尝试从模型的 JSON 配置中获取部件信息
-      let modelSettings = null;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let modelSettings: any = null;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if ((model as any)._modelSettings) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         modelSettings = (model as any)._modelSettings;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } else if ((model as any).modelSettings) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         modelSettings = (model as any).modelSettings;
       }
 
-
-      //  Cubism 2 模型 - 从 modelSettings 获取
-      if (modelSettings && modelSettings.parts) {
-        // Cubism 2 模型配置中的 parts 数组
-        partIds = modelSettings.parts.map((part: any) => part.id || part);
-        partCount = partIds.length;
-        console.log('✅ 检测到 Cubism 2 模型，从配置读取部件:', partIds);
-      }
-      //  Cubism 4 模型
-      // else if (coreModel.parts && coreModel.parts.ids && coreModel.parts.count) {
-      //   partIds = coreModel.parts.ids;
-      //   partCount = coreModel.parts.count;
-      //   console.log('✅ 检测到 Cubism 4 模型');
-      // } 
-      // 尝试从 coreModel 的内部结构获取（Cubism 2）
-      else if (coreModel && typeof coreModel.getPartsOpacity === 'function') {
+      // Cubism 2 模型 - 获取部件 ID 列表
+      if (coreModel && typeof coreModel.getPartsOpacity === 'function') {
         // Cubism 2 的 Live2DModelWebGL
-        // 尝试从 modelImpl 获取部件数据
-        const modelImpl = coreModel.modelImpl || coreModel;
+        console.log('🔍 检测到 Cubism 2 模型');
         
-        // 尝试获取部件数组
-        if (modelImpl._$aS && Array.isArray(modelImpl._$aS)) {
-          partCount = modelImpl._$aS.length;
-          for (let i = 0; i < partCount; i++) {
-            const partData = modelImpl._$aS[i];
-            if (partData && partData.getPartsDataID) {
-              const partId = partData.getPartsDataID();
-              partIds.push(partId.id || `Part_${i}`);
-            } else {
-              partIds.push(`Part_${i}`);
-            }
-          }
-          console.log('✅ 检测到 Cubism 2 模型，从 modelImpl 读取部件');
+        // 尝试多种方法获取部件 ID 列表
+        let foundPartIds = false;
+        
+        // 方法1: 尝试从 coreModel._partIds 获取
+        if (coreModel._partIds && Array.isArray(coreModel._partIds)) {
+          partIds = [...coreModel._partIds];
+          partCount = partIds.length;
+          partNames = [...partIds];
+          foundPartIds = true;
+          console.log('✅ 方法1: 从 coreModel._partIds 读取到部件:', partIds);
         }
-        // 如果还是找不到，尝试通过测试获取部件数量
-        else {
-          console.log('⚠️ 尝试通过测试方式检测部件数量...');
-          // 尝试最多 100 个索引
+        
+        // 方法2: 尝试从 modelSettings.init_opacities 获取
+        if (!foundPartIds && modelSettings && modelSettings.init_opacities && Array.isArray(modelSettings.init_opacities)) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          partIds = modelSettings.init_opacities.map((item: any) => item.id);
+          partCount = partIds.length;
+          partNames = [...partIds];
+          foundPartIds = true;
+          console.log('✅ 方法2: 从 modelSettings.init_opacities 读取到部件:', partIds);
+        }
+        
+        // 方法3: 通过遍历索引并尝试获取部件名称
+        if (!foundPartIds) {
+          console.log('⚠️ 方法3: 尝试通过遍历索引获取部件...');
+          
+          // 先确定部件数量
           for (let i = 0; i < 100; i++) {
             try {
               const opacity = coreModel.getPartsOpacity(i);
               if (opacity !== undefined && opacity !== null && !isNaN(opacity)) {
-                partIds.push(`Part_${i}`);
                 partCount++;
               } else {
                 break;
               }
-            } catch (e) {
+            } catch {
               break;
             }
           }
+          
+          // 尝试从 modelSettings 获取部件 ID
+          if (modelSettings && modelSettings.init_opacities) {
+            for (let i = 0; i < partCount; i++) {
+              const opacityItem = modelSettings.init_opacities[i];
+              if (opacityItem && opacityItem.id) {
+                partIds.push(opacityItem.id);
+                partNames.push(opacityItem.id);
+              } else {
+                // 如果找不到，使用格式化的名称
+                const name = `PART_${String(i).padStart(2, '0')}`;
+                partIds.push(i.toString());
+                partNames.push(name);
+              }
+            }
+          } else {
+            // 完全找不到，使用索引
+            for (let i = 0; i < partCount; i++) {
+              const name = `PART_${String(i).padStart(2, '0')}`;
+              partIds.push(i.toString());
+              partNames.push(name);
+            }
+          }
+          
           if (partCount > 0) {
-            console.log(`✅ 通过测试检测到 ${partCount} 个部件`);
+            foundPartIds = true;
+            console.log(`✅ 方法3: 通过遍历检测到 ${partCount} 个部件`);
+            console.log('部件名称:', partNames);
           }
         }
+        
+        if (!foundPartIds || partCount === 0) {
+          console.error('❌ 所有方法都无法获取部件信息');
+          console.log('调试信息:', {
+            hasCoreModel: !!coreModel,
+            hasPartIds: !!(coreModel._partIds),
+            hasModelSettings: !!modelSettings,
+            hasInitOpacities: !!(modelSettings && modelSettings.init_opacities),
+            coreModelKeys: Object.keys(coreModel).slice(0, 20)
+          });
+          alert('无法获取模型部件信息\n\n请查看控制台了解详细信息');
+          return;
+        }
+        
+        console.log('✅ 最终获取到部件数量:', partCount);
       }
-      // 方法4: 其他尝试
+      // Cubism 4 模型
+      else if (coreModel.parts && coreModel.parts.ids && coreModel.parts.count) {
+        partIds = [...coreModel.parts.ids];
+        partNames = [...coreModel.parts.ids]; // Cubism 4 的 IDs 就是名称
+        partCount = coreModel.parts.count;
+        console.log('✅ 检测到 Cubism 4 模型，部件数量:', partCount);
+      }
+      // 其他尝试
       else if (coreModel.getPartCount && typeof coreModel.getPartCount === 'function') {
         partCount = coreModel.getPartCount();
         for (let i = 0; i < partCount; i++) {
-          partIds.push(`Part_${i}`);
+          partIds.push(i.toString());
+          partNames.push(`PART_${String(i).padStart(2, '0')}`);
         }
-        console.log('✅ 通过 getPartCount 获取部件数量');
+        console.log('✅ 通过 getPartCount 获取部件数量:', partCount);
       }
       
       // 如果所有方法都失败
@@ -308,20 +356,25 @@ export default function RecordingManager({
       // 对每个部件进行截图
       for (let i = 0; i < partCount; i++) {
         const partId = partIds[i];
+        const partName = partNames[i];
         
         // 将所有部件设为透明
         for (let j = 0; j < partCount; j++) {
           if (coreModel.setPartsOpacity) {
+            // Cubism 2: 使用索引设置透明度
             coreModel.setPartsOpacity(j, 0);
           } else if (coreModel.parts && coreModel.parts.opacities) {
+            // Cubism 4: 直接设置 opacities 数组
             coreModel.parts.opacities[j] = 0;
           }
         }
 
         // 只显示当前部件
         if (coreModel.setPartsOpacity) {
+          // Cubism 2: 使用索引设置透明度
           coreModel.setPartsOpacity(i, 1);
         } else if (coreModel.parts && coreModel.parts.opacities) {
+          // Cubism 4: 直接设置 opacities 数组
           coreModel.parts.opacities[i] = 1;
         }
 
@@ -330,7 +383,7 @@ export default function RecordingManager({
           coreModel.update();
         }
         
-        // 等待一帧以确保渲染完成
+        // 等待两帧以确保渲染完成
         await new Promise(resolve => requestAnimationFrame(resolve));
         await new Promise(resolve => requestAnimationFrame(resolve));
 
@@ -342,10 +395,10 @@ export default function RecordingManager({
         });
 
         if (blob) {
-          // 添加到 ZIP
+          // 添加到 ZIP，使用部件名称作为文件名
           const arrayBuffer = await blob.arrayBuffer();
-          screenshotsFolder.file(`${partId}.png`, arrayBuffer);
-          console.log(`✅ 部件 ${partId} 截图完成`);
+          screenshotsFolder.file(`${partName}.png`, arrayBuffer);
+          console.log(`✅ 部件 ${partName} (索引 ${i}, ID: ${partId}) 截图完成`);
         }
       }
 
@@ -375,7 +428,8 @@ export default function RecordingManager({
       URL.revokeObjectURL(url);
 
       console.log('✅ 所有部件截图已保存到压缩包');
-      alert(`成功截取 ${partCount} 个部件并导出为压缩包`);
+      console.log('📋 部件列表:', partNames);
+      alert(`成功截取 ${partCount} 个部件并导出为压缩包！\n\n部件名称预览:\n${partNames.slice(0, 10).join('\n')}${partCount > 10 ? `\n... 还有 ${partCount - 10} 个部件` : ''}`);
     } catch (error) {
       console.error('部件截图失败:', error);
       alert('部件截图失败: ' + error);
