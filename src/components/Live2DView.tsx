@@ -850,6 +850,7 @@ export default function Live2DView() {
             isComposite={isCompositeRef.current}
             subModels={modelManager.getSubModels()}
             onParameterChange={modelManager.getAllSubModelParameters}
+            onSetParameter={modelManager.setModelParameter}
           />
         )}
       )}

@@ -524,19 +524,34 @@ export default function ModelManager({
       
       const coreModel = im.coreModel;
       
-      // 获取参数数量
-      const paramCount = coreModel.getParamCount?.() ?? 0;
+      // 尝试获取 _paramIds
+      let paramIds: string[] = [];
+      if ((coreModel as any)._paramIds && Array.isArray((coreModel as any)._paramIds)) {
+        paramIds = (coreModel as any)._paramIds;
+      }
       
-      for (let i = 0; i < paramCount; i++) {
+      // 如果没有，尝试获取参数数量
+      if (paramIds.length === 0) {
+        const paramCount = coreModel.getParamCount?.() ?? 0;
+        for (let i = 0; i < paramCount; i++) {
+          try {
+            const id = coreModel.getParamId?.(i) ?? `Param_${i}`;
+            paramIds.push(id);
+          } catch (e) {
+            // 跳过
+          }
+        }
+      }
+      
+      paramIds.forEach(paramId => {
         try {
-          const id = coreModel.getParamId?.(i) ?? `Param_${i}`;
-          const value = coreModel.getParamFloat?.(id) ?? 0;
-          const min = coreModel.getParamMinValue?.(id) ?? -1;
-          const max = coreModel.getParamMaxValue?.(id) ?? 1;
+          const value = coreModel.getParamFloat?.(paramId) ?? 0;
+          const min = coreModel.getParamMinValue?.(paramId) ?? -1;
+          const max = coreModel.getParamMaxValue?.(paramId) ?? 1;
           
           params.push({
-            id,
-            name: id.replace(/^Param/, ""),
+            id: paramId,
+            name: paramId.replace(/^Param/, ""),
             value,
             min,
             max,
@@ -545,11 +560,37 @@ export default function ModelManager({
         } catch (e) {
           // 跳过无法读取的参数
         }
-      }
+      });
     } catch (e) {
       console.warn("获取模型参数失败:", e);
     }
     return params;
+  };
+
+  // 设置模型参数
+  const setModelParameter = (model: Live2DModel, paramId: string, value: number): boolean => {
+    try {
+      const im = (model as any).internalModel;
+      if (!im?.coreModel?.setParamFloat) return false;
+      
+      im.coreModel.setParamFloat(paramId, value);
+      return true;
+    } catch (e) {
+      console.warn(`设置参数 ${paramId} 失败:`, e);
+      return false;
+    }
+  };
+
+  // 获取模型参数值
+  const getModelParameter = (model: Live2DModel, paramId: string): number | null => {
+    try {
+      const im = (model as any).internalModel;
+      if (!im?.coreModel?.getParamFloat) return null;
+      
+      return im.coreModel.getParamFloat(paramId);
+    } catch (e) {
+      return null;
+    }
   };
 
   // 获取所有子模型的参数（去重合并）
@@ -587,6 +628,8 @@ export default function ModelManager({
     resolveRelativeFrom,
     getSubModels,
     getModelParameters,
-    getAllSubModelParameters
+    getAllSubModelParameters,
+    setModelParameter,
+    getModelParameter
   };
 } 

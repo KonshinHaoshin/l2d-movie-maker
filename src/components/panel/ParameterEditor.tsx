@@ -19,6 +19,7 @@ interface ParameterEditorProps {
   isComposite: boolean;
   subModels?: Live2DModel[];
   onParameterChange?: () => any[];
+  onSetParameter?: (model: Live2DModel, paramId: string, value: number) => boolean;
   onTrackChange?: (tracks: ParameterTrack[]) => void;
 }
 
@@ -27,6 +28,7 @@ export function ParameterEditor({
   isComposite, 
   subModels = [],
   onParameterChange,
+  onSetParameter,
   onTrackChange 
 }: ParameterEditorProps) {
   const [parameters, setParameters] = useState<any[]>([]);
@@ -118,24 +120,31 @@ export function ParameterEditor({
 
   // 设置参数值
   const setParameterValue = useCallback((paramId: string, value: number) => {
-    const modelsToUpdate = isComposite ? [model, ...subModels] : [model];
+    // 如果提供了回调，使用回调设置参数
+    if (onSetParameter && model) {
+      const modelsToUpdate = isComposite ? [model, ...subModels] : [model];
+      modelsToUpdate.forEach(m => onSetParameter(m, paramId, value));
+    } else {
+      // 否则使用原有的直接设置逻辑
+      const modelsToUpdate = isComposite ? [model, ...subModels] : [model];
 
-    modelsToUpdate.forEach((m) => {
-      try {
-        const im = (m as any).internalModel;
-        if (im?.coreModel?.setParamFloat) {
-          im.coreModel.setParamFloat(paramId, value);
+      modelsToUpdate.forEach((m) => {
+        try {
+          const im = (m as any).internalModel;
+          if (im?.coreModel?.setParamFloat) {
+            im.coreModel.setParamFloat(paramId, value);
+          }
+        } catch (e) {
+          // 忽略
         }
-      } catch (e) {
-        // 忽略
-      }
-    });
+      });
+    }
 
     // 更新本地状态
     setParameters(prev => prev.map(p => 
       p.id === paramId ? { ...p, value } : p
     ));
-  }, [model, isComposite, subModels]);
+  }, [model, isComposite, subModels, onSetParameter]);
 
   // 滑块改变时实时预览
   const handleSliderChange = (paramId: string, value: number) => {
