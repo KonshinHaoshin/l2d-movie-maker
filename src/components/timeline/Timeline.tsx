@@ -4,7 +4,6 @@ import type { Clip, TrackKind } from "./types";
 type Props = {
     motionClips: Clip[];
     exprClips: Clip[];
-    paramClips?: Clip[]; // 参数关键帧
     audioClips: Clip[]; // 新增音频轨
     playheadSec: number;
 
@@ -77,17 +76,16 @@ export default function Timeline({
         onChangePixelsPerSec ? onChangePixelsPerSec(next) : setInternalPps(next);
     };
 
-    // 时间线总时长：取四条轨的最大结束时间
+    // 时间线总时长：取三条轨的最大结束时间
     const lengthSec = useMemo(
         () =>
             Math.max(
                 motionClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
                 exprClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
-                (paramClips || []).reduce((t, c) => Math.max(t, c.start + c.duration), 0),
                 audioClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
                 0
             ),
-        [motionClips, exprClips, paramClips, audioClips]
+        [motionClips, exprClips, audioClips]
     );
 
     const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -428,7 +426,6 @@ export default function Timeline({
             <Ruler />
             <Track title="动作" clips={motionClips} color="#7c4dff" track="motion" />
             <Track title="表情" clips={exprClips} color="#26a69a" track="expr" />
-            <Track title="参数" clips={paramClips || []} color="#42a5f5" track="param" />
             <Track title="音频" clips={audioClips} color="#ff6b35" track="audio" />
         </div>
     );

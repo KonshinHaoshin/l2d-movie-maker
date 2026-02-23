@@ -1,5 +1,6 @@
 import * as PIXI from "pixi.js";
 import { Live2DModel } from "pixi-live2d-display";
+import { readDir, readTextFile } from "@tauri-apps/plugin-fs";
 
 interface Motion { name: string; file: string; }
 interface Expression { name: string; file: string; }
@@ -8,7 +9,14 @@ interface ModelData {
   expressions: Expression[];
 }
 
-interface ModelManagerProps {
+interface WebGALModelInfo {
+  path: string;
+  name: string;
+  type: 'json' | 'jsonl';
+  fullPath: string;
+}
+
+interface WebGALModelManagerProps {
   appRef: React.MutableRefObject<PIXI.Application | null>;
   modelRef: React.MutableRefObject<Live2DModel | Live2DModel[] | null>;
   groupContainerRef: React.MutableRefObject<PIXI.Container | null>;
@@ -20,7 +28,7 @@ interface ModelManagerProps {
   setIsDragging: (dragging: boolean) => void;
 }
 
-export default function ModelManager({
+export default function WebGALModelManager({
   appRef,
   modelRef,
   groupContainerRef,
@@ -30,19 +38,11 @@ export default function ModelManager({
   setCustomRecordingBounds,
   enableDragging,
   setIsDragging
-}: ModelManagerProps) {
+}: WebGALModelManagerProps) {
   
   // 工具函数
-  const isJsonl = (u: string) => /\.jsonl(\?|#|$)/i.test(u);
-  
-  const resolveRelativeFrom = (baseUrl: string, rel: string) => {
-    if (/^https?:\/\//i.test(rel)) return rel;
-    if (rel.startsWith("/")) return rel;
-    if (rel.startsWith("./")) rel = rel.slice(2);
-    const base = baseUrl.slice(0, baseUrl.lastIndexOf("/") + 1);
-    return base + rel;
-  };
 
+  
   const forEachModel = (fn: (m: Live2DModel) => void) => {
     const cur = modelRef.current;
     if (!cur) return;
@@ -54,12 +54,9 @@ export default function ModelManager({
     const app = appRef.current;
     if (!app) return;
     try {
-      console.log('🧹 开始清理当前模型...');
-      
       if (Array.isArray(modelRef.current)) {
         // 移除并销毁复合容器
         if (groupContainerRef.current) {
-          console.log('🗑️ 清理复合模型容器...');
           groupContainerRef.current.removeChildren().forEach((c: any) => {
             try { c.destroy?.({ children: true, texture: true, baseTexture: true }); } catch {}
           });
@@ -67,21 +64,14 @@ export default function ModelManager({
           try { groupContainerRef.current.destroy?.({ children: true }); } catch {}
         }
       } else if (modelRef.current) {
-        console.log('🗑️ 清理单模型...');
         app.stage.removeChild(modelRef.current as any);
         try { (modelRef.current as any).destroy?.({ children: true, texture: true, baseTexture: true }); } catch {}
       }
-      
-      // 清理引用
-      groupContainerRef.current = null;
-      modelRef.current = null;
-      isCompositeRef.current = false;
-      motionBaseRef.current = null;
-      
-      console.log('✅ 模型清理完成');
-    } catch (error) {
-      console.warn('⚠️ 模型清理过程中出现警告:', error);
-    }
+    } catch {}
+    groupContainerRef.current = null;
+    modelRef.current = null;
+    isCompositeRef.current = false;
+    motionBaseRef.current = null;
   };
 
   // 使模型/容器可拖动
@@ -172,24 +162,82 @@ export default function ModelManager({
     window.addEventListener("resize", redrawHit);
   };
 
-  // 单模型加载
-  const loadSingleModel = async (app: PIXI.Application, url: string) => {
+  // 遍历游戏目录，查找所有可用的模型文件
+  const scanGameModels = async (gameDir: string): Promise<WebGALModelInfo[]> => {
     try {
-      const model = await Live2DModel.from(url);
-      modelRef.current = model;
-      isCompositeRef.current = false;
-      motionBaseRef.current = url.slice(0, url.lastIndexOf("/") + 1);
-
-      // 读取 json
-      const res = await fetch(url, { cache: "no-cache" });
+      console.log('🔍 开始扫描游戏目录:', gameDir);
+      const models: WebGALModelInfo[] = [];
       
-      // 检查响应状态
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      // 扫描 game/figure 目录
+      const figureDir = `${gameDir}/game/figure`;
+      try {
+        // 手动递归扫描目录，因为某些版本的 readDir 可能不支持 recursive 选项
+        const scanDirectory = async (dirPath: string, relativePath: string = "") => {
+          const entries = await readDir(dirPath);
+          
+          for (const entry of entries) {
+            const entryName = entry.name || '';
+            const entryPath = relativePath ? `${relativePath}/${entryName}` : entryName;
+            const fullEntryPath = `${dirPath}/${entryName}`;
+            
+            // 检查是否为目录 - 使用更安全的方法
+            // 如果 entryName 不包含扩展名，可能是目录
+            const hasExtension = /\.\w+$/.test(entryName);
+            
+            if (!hasExtension) {
+              // 可能是目录，尝试递归扫描
+              try {
+                await scanDirectory(fullEntryPath, entryPath);
+              } catch (dirErr) {
+                // 如果扫描失败，可能是文件或权限问题，跳过
+                console.warn(`跳过目录扫描: ${fullEntryPath}`, dirErr);
+              }
+            } else {
+              // 有扩展名，检查是否为模型文件
+              if (entryName.endsWith('.json') || entryName.endsWith('.jsonl')) {
+                models.push({
+                  path: `game/figure/${entryPath}`,
+                  name: entryName.replace(/\.(json|jsonl)$/, ''),
+                  type: entryName.endsWith('.jsonl') ? 'jsonl' : 'json',
+                  fullPath: fullEntryPath
+                });
+              }
+            }
+          }
+        };
+        
+        await scanDirectory(figureDir);
+        
+      } catch (error) {
+        console.warn('⚠️ 扫描 game/figure 目录失败:', error);
       }
       
-      const data = await res.json();
+      console.log(`✅ 扫描完成，找到 ${models.length} 个模型文件`);
+      return models;
+    } catch (error) {
+      console.error('❌ 扫描游戏目录失败:', error);
+      return [];
+    }
+  };
+
+  // 加载单个模型
+  const loadSingleModel = async (app: PIXI.Application, filePath: string) => {
+    try {
+      console.log('📁 加载单模型:', filePath);
+      
+      // 使用 Tauri 文件系统 API 读取文件内容
+      const modelJson = await readTextFile(filePath);
+      const data = JSON.parse(modelJson);
       setModelData(data);
+
+      // 创建模型（将文件内容转换为 blob URL）
+      const blob = new Blob([modelJson], { type: 'application/json' });
+      const blobUrl = URL.createObjectURL(blob);
+      
+      const model = await Live2DModel.from(blobUrl);
+      modelRef.current = model;
+      isCompositeRef.current = false;
+      motionBaseRef.current = filePath.slice(0, filePath.lastIndexOf("/") + 1);
 
       model.anchor.set(0.5, 0.5);
       model.scale.set(0.3);
@@ -224,43 +272,27 @@ export default function ModelManager({
         height: Math.min(modelHeight, app.screen.height)
       });
       
-      console.log("📐 模型边框计算:", { modelWidth, modelHeight, modelX, modelY });
+      console.log("📐 WebGAL 模型边框计算:", { modelWidth, modelHeight, modelX, modelY });
+      
+      // 清理 blob URL
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
       
     } catch (err) {
-      console.error("❌ 模型加载失败:", err);
+      console.error("❌ WebGAL 模型加载失败:", err);
       setModelData(null);
     }
   };
 
-  // 复合（.jsonl）模型加载
-  type JsonlPart = {
-    path: string;
-    id?: string;
-    x?: number;
-    y?: number;
-    xscale?: number;
-    yscale?: number;
-  };
-
-  const loadJsonlComposite = async (app: PIXI.Application, jsonlUrl: string) => {
+  // 加载复合模型
+  const loadJsonlComposite = async (app: PIXI.Application, filePath: string) => {
     try {
-      const response = await fetch(jsonlUrl, { cache: "no-cache" });
+      console.log('📁 加载复合模型:', filePath);
       
-      // 检查响应状态和内容类型
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      
-      const text = await response.text();
-      
-      // 检查是否是HTML内容（文件不存在时的回退页面）
-      if (text.includes('<!DOCTYPE html>') || text.includes('<html')) {
-        throw new Error(`文件不存在或路径错误: ${jsonlUrl} (返回HTML页面)`);
-      }
-      
+      // 使用 Tauri 文件系统 API 读取文件内容
+      const text = await readTextFile(filePath);
       const lines = text.split("\n").filter(Boolean);
 
-      const parts: JsonlPart[] = [];
+      const parts: Array<{ path: string; id?: string; x?: number; y?: number; xscale?: number; yscale?: number }> = [];
       let summary: { motions?: string[]; expressions?: string[]; import?: number } = {};
 
       for (const line of lines) {
@@ -274,9 +306,12 @@ export default function ModelManager({
             continue;
           }
           if (obj?.path) {
+            // 构建完整路径
+            const baseDir = filePath.slice(0, filePath.lastIndexOf("/") + 1);
             const fullPath = obj.path.startsWith("game/")
-              ? obj.path
-              : resolveRelativeFrom(jsonlUrl, obj.path.replace(/^\.\//, ""));
+              ? `${baseDir.replace(/\/game\/figure\/.*$/, '')}/${obj.path}`
+              : `${baseDir}${obj.path}`;
+            
             parts.push({
               path: fullPath,
               id: obj.id,
@@ -292,7 +327,7 @@ export default function ModelManager({
       }
 
       if (!parts.length) {
-        console.warn("No valid parts in jsonl:", jsonlUrl);
+        console.warn("No valid parts in jsonl:", filePath);
         setModelData(null);
         return;
       }
@@ -311,7 +346,12 @@ export default function ModelManager({
       const children: Live2DModel[] = [];
       for (const p of parts) {
         try {
-          const m = await Live2DModel.from(p.path, { autoInteract: false });
+          // 对于本地文件，我们需要将路径转换为 blob URL
+          const modelJson = await readTextFile(p.path);
+          const blob = new Blob([modelJson], { type: 'application/json' });
+          const blobUrl = URL.createObjectURL(blob);
+          
+          const m = await Live2DModel.from(blobUrl, { autoInteract: false });
           m.visible = false;
           m.anchor.set(0.5);
 
@@ -342,8 +382,12 @@ export default function ModelManager({
 
           group.addChild(m);
           children.push(m);
+          
+          // 清理 blob URL
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+          
         } catch (e) {
-          console.warn("子模型加载失败:", p.path, e);
+          console.warn("WebGAL 子模型加载失败:", p.path, e);
         }
       }
 
@@ -362,14 +406,15 @@ export default function ModelManager({
           width: Math.min(b.width, app.screen.width),
           height: Math.min(b.height, app.screen.height),
         });
-        console.log("📦 JSONL 复合包围盒:", b);
+        console.log("📦 WebGAL JSONL 复合包围盒:", b);
       });
 
       // 合成 modelData：从第一只子模型的 model.json 过滤
       let synth: ModelData | null = null;
       try {
-        const firstModelJson = await (await fetch(parts[0].path, { cache: "no-cache" })).json();
-        const fullMotions = firstModelJson?.motions ?? {};
+        const firstModelJson = await readTextFile(parts[0].path);
+        const firstModelData = JSON.parse(firstModelJson);
+        const fullMotions = firstModelData?.motions ?? {};
         const motionGroups = summary.motions?.length ? summary.motions : Object.keys(fullMotions);
 
         const motionsFiltered: Record<string, Motion[]> = {};
@@ -381,14 +426,14 @@ export default function ModelManager({
           }));
         }
 
-        const fullExpr = firstModelJson?.expressions ?? [];
+        const fullExpr = firstModelData?.expressions ?? [];
         const expressions: Expression[] = summary.expressions?.length
           ? fullExpr.filter((e: any) => summary.expressions!.includes(e?.name)).map((e: any) => ({ name: e?.name, file: e?.file }))
           : fullExpr.map((e: any) => ({ name: e?.name, file: e?.file }));
 
         synth = { motions: motionsFiltered, expressions };
       } catch (e) {
-        console.warn("综合 modelData 失败：", e);
+        console.warn("综合 WebGAL modelData 失败：", e);
         synth = { motions: {}, expressions: [] };
       }
 
@@ -413,20 +458,85 @@ export default function ModelManager({
     }
   };
 
-  // 实际加载：根据后缀分流
-  const loadAnyModel = async (app: PIXI.Application, url: string) => {
-    if (isJsonl(url)) {
-      await loadJsonlComposite(app, url);
-    } else {
-      await loadSingleModel(app, url);
+  // 加载模型（根据类型选择加载方法）
+  const loadModel = async (app: PIXI.Application, modelInfo: WebGALModelInfo) => {
+    try {
+      console.log('🎬 开始加载 WebGAL 模型:', modelInfo.name);
+      
+      if (modelInfo.type === 'jsonl') {
+        await loadJsonlComposite(app, modelInfo.fullPath);
+      } else {
+        await loadSingleModel(app, modelInfo.fullPath);
+      }
+      
+      console.log('✅ WebGAL 模型加载完成:', modelInfo.name);
+    } catch (error) {
+      console.error('❌ WebGAL 模型加载失败:', error);
+    }
+  };
+
+  // 播放动作
+  const playMotion = (motionName: string) => {
+    if (!modelRef.current) return;
+    
+    try {
+      if (Array.isArray(modelRef.current)) {
+        // 复合模型
+        modelRef.current.forEach(model => {
+          try {
+            (model as any).motion(motionName);
+          } catch (e) {
+            console.warn('播放动作失败:', motionName, e);
+          }
+        });
+      } else {
+        // 单模型
+        try {
+          (modelRef.current as any).motion(motionName);
+        } catch (e) {
+          console.warn('播放动作失败:', motionName, e);
+        }
+      }
+      console.log('🎭 播放动作:', motionName);
+    } catch (error) {
+      console.error('❌ 播放动作失败:', error);
+    }
+  };
+
+  // 设置表情
+  const setExpression = (expressionName: string) => {
+    if (!modelRef.current) return;
+    
+    try {
+      if (Array.isArray(modelRef.current)) {
+        // 复合模型
+        modelRef.current.forEach(model => {
+          try {
+            (model as any).expression(expressionName);
+          } catch (e) {
+            console.warn('设置表情失败:', expressionName, e);
+          }
+        });
+      } else {
+        // 单模型
+        try {
+          (modelRef.current as any).expression(expressionName);
+        } catch (e) {
+          console.warn('设置表情失败:', expressionName, e);
+        }
+      }
+      console.log('😊 设置表情:', expressionName);
+    } catch (error) {
+      console.error('❌ 设置表情失败:', error);
     }
   };
 
   return {
-    loadAnyModel,
-    cleanupCurrentModel,
+    scanGameModels,
+    loadModel,
+    playMotion,
+    setExpression,
     forEachModel,
-    isJsonl,
-    resolveRelativeFrom
+    cleanupCurrentModel
   };
 } 

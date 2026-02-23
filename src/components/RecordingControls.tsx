@@ -8,8 +8,8 @@ interface RecordingControlsProps {
     height: number;
   };
   setCustomRecordingBounds: (bounds: { x: number; y: number; width: number; height: number }) => void;
-  enableModelBoundsRecording: boolean;
-  setEnableModelBoundsRecording: (enable: boolean) => void;
+  useModelFrame: boolean;
+  setUseModelFrame: (use: boolean) => void;
   recordingQuality: "low" | "medium" | "high";
   setRecordingQuality: (quality: "low" | "medium" | "high") => void;
   transparentBg: boolean;
@@ -33,8 +33,8 @@ export default function RecordingControls({
   setShowRecordingBounds,
   customRecordingBounds,
   setCustomRecordingBounds,
-  enableModelBoundsRecording,
-  setEnableModelBoundsRecording,
+  useModelFrame,
+  setUseModelFrame,
   recordingQuality,
   setRecordingQuality,
   transparentBg,
@@ -58,6 +58,19 @@ export default function RecordingControls({
       <div className="recording-bounds-settings">
         <input
           type="checkbox"
+          id="useModelFrame"
+          checked={useModelFrame}
+          onChange={(e) => setUseModelFrame(e.target.checked)}
+          className="recording-bounds-checkbox"
+        />
+        <label htmlFor="useModelFrame" className="recording-bounds-label">
+          启用模型区域录制
+        </label>
+      </div>
+
+      <div className="recording-bounds-settings">
+        <input
+          type="checkbox"
           id="showRecordingBounds"
           checked={showRecordingBounds}
           onChange={(e) => setShowRecordingBounds(e.target.checked)}
@@ -65,19 +78,6 @@ export default function RecordingControls({
         />
         <label htmlFor="showRecordingBounds" className="recording-bounds-label">
           显示录制区域边框
-        </label>
-      </div>
-
-      <div className="recording-bounds-settings">
-        <input
-          type="checkbox"
-          id="enableModelBoundsRecording"
-          checked={enableModelBoundsRecording}
-          onChange={(e) => setEnableModelBoundsRecording(e.target.checked)}
-          className="recording-bounds-checkbox"
-        />
-        <label htmlFor="enableModelBoundsRecording" className="recording-bounds-label">
-          启用模型区域录制（裁剪模式）
         </label>
       </div>
 

@@ -10,8 +10,8 @@ interface ExportToolbarProps {
     height: number;
   };
   setCustomRecordingBounds: (bounds: { x: number; y: number; width: number; height: number }) => void;
-  enableModelBoundsRecording: boolean;
-  setEnableModelBoundsRecording: (enable: boolean) => void;
+  useModelFrame: boolean;
+  setUseModelFrame: (use: boolean) => void;
   recordingQuality: "low" | "medium" | "high";
   setRecordingQuality: (quality: "low" | "medium" | "high") => void;
   transparentBg: boolean;

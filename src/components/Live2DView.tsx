@@ -7,25 +7,20 @@ import type { Clip, TrackKind } from "./timeline/types";
 import { parseMtn } from "../utils/parseMtn";
 import "./Live2DView.css";
 import ControlPanel from "./panel/ControlPanel";
-import { CharacterPanel } from "./panel/CharacterPanel";
-import { ParameterEditor } from "./panel/ParameterEditor";
 import RecordingBounds from "./RecordingBounds";
 import ExportToolbar from "./ExportToolbar";
 import ModelManager from "./ModelManager";
 import AudioManager from "./AudioManager";
 import RecordingManager from "./RecordingManager";
-
+import WebGALMode from "./WebGALMode";
 // import { convertFileSrc } from "@tauri-apps/api/core";
 // import { normalizePath } from "../utils/fs";
-
+import { WebGALParser } from "../utils/webgalParser";
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { appCacheDir, BaseDirectory, join } from "@tauri-apps/api/path";
 import { writeFile } from "@tauri-apps/plugin-fs";
 import { isVp9AlphaSupported } from "../utils/recorder";
-import { WebGALParser } from "../utils/webgalParser";
-import type { Character } from "../types/character";
-import { defaultCharacter } from "../types/character";
 
 interface Motion { name: string; file: string; }
 interface Expression { name: string; file: string; }
@@ -41,9 +36,6 @@ export default function Live2DView() {
   // 允许保存单模型或复合的子模型数组
   const modelRef = useRef<Live2DModel | Live2DModel[] | null>(null);
   const appRef = useRef<PIXI.Application | null>(null);
-  
-  // 多角色模型引用 Map
-  const characterModelsRef = useRef<Map<string, Live2DModel>>(new Map());
 
   // 复合（.jsonl）时的容器与标记、MTN 解析基准目录
   const groupContainerRef = useRef<PIXI.Container | null>(null);
@@ -69,7 +61,6 @@ export default function Live2DView() {
   // —— 时间线 —— //
   const [motionClips, setMotionClips] = useState<Clip[]>([]);
   const [exprClips, setExprClips] = useState<Clip[]>([]);
-  const [paramClips, setParamClips] = useState<Clip[]>([]); // 参数关键帧 clips
   const [audioClips, setAudioClips] = useState<Clip[]>([]); // 新增音频轨
   const [playhead, setPlayhead] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -95,173 +86,15 @@ export default function Live2DView() {
   // —— 用户自定义录制范围 —— //
   const [customRecordingBounds, setCustomRecordingBounds] = useState({ x: 0, y: 0, width: 800, height: 600 });
   const [showRecordingBounds, setShowRecordingBounds] = useState(false);
-  const [enableModelBoundsRecording, setEnableModelBoundsRecording] = useState(false);
    
   // —— 录制质量设置 —— //
   const [recordingQuality, setRecordingQuality] = useState<"low" | "medium" | "high">("medium");
-
-  // —— 角色管理 —— //
-  const [characters, setCharacters] = useState<Character[]>([]);
-  const [activeCharacterId, setActiveCharacterId] = useState<string | null>(null);
-  const [showCharacterPanel, setShowCharacterPanel] = useState(false);
   
-  // 编辑器模式: "timeline" | "parameter"
-  const [editorMode, setEditorMode] = useState<"timeline" | "parameter">("timeline");
-
-  // 角色操作函数
-  const handleAddCharacter = async (character: Character) => {
-    // 添加角色
-    const newChars = [...characters, character];
-    setCharacters(newChars);
-    
-    // 如果有 appRef，加载角色模型
-    if (appRef.current && assetBase) {
-      const modelUrl = `${assetBase}/${character.modelPath}`;
-      const model = await modelManager.loadCharacterModel(
-        appRef.current,
-        character.id,
-        modelUrl,
-        { x: character.x, y: character.y, scale: character.scale, opacity: character.opacity, enableDragging }
-      );
-      
-      if (model) {
-        characterModelsRef.current.set(character.id, model);
-        
-        // 按 zIndex 排序
-        updateCharacterZIndex();
-        
-        // 如果是第一个角色，设置为活动角色
-        if (newChars.length === 1) {
-          setActiveCharacterId(character.id);
-          modelRef.current = model;
-        }
-      }
-    } else {
-      // 如果没有 appRef，只添加角色
-      if (newChars.length === 1) {
-        setActiveCharacterId(character.id);
-        setSelectedModel(character.modelPath);
-      }
-    }
-  };
-
-  // 更新角色 zIndex 排序
-  const updateCharacterZIndex = () => {
-    if (!appRef.current) return;
-    
-    const sorted = [...characters].sort((a, b) => a.zIndex - b.zIndex);
-    
-    sorted.forEach((char, index) => {
-      const model = characterModelsRef.current.get(char.id);
-      if (model) {
-        appRef.current!.stage.setChildIndex(model as any, index);
-      }
-    });
-  };
-
-  const handleRemoveCharacter = (id: string) => {
-    // 先卸载模型
-    const model = characterModelsRef.current.get(id);
-    if (model && appRef.current) {
-      modelManager.unloadCharacterModel(appRef.current, id, model);
-      characterModelsRef.current.delete(id);
-    }
-    
-    setCharacters(characters.filter(c => c.id !== id));
-    if (activeCharacterId === id) {
-      setActiveCharacterId(null);
-      modelRef.current = null;
-    }
-  };
-
-  const handleRemoveCharacter = (id: string) => {
-    setCharacters(characters.filter(c => c.id !== id));
-    if (activeCharacterId === id) {
-      setActiveCharacterId(null);
-    }
-  };
-
-  const handleUpdateCharacter = (id: string, updates: Partial<Character>) => {
-    setCharacters(characters.map(c => c.id === id ? { ...c, ...updates } : c));
-    
-    // 同步更新模型属性
-    const model = characterModelsRef.current.get(id);
-    if (model) {
-      modelManager.updateCharacterModel(model, {
-        x: updates.x,
-        y: updates.y,
-        scale: updates.scale,
-        opacity: updates.opacity
-      });
-      
-      // 如果 zIndex 变化，更新渲染顺序
-      if (updates.zIndex !== undefined) {
-        updateCharacterZIndex();
-      }
-    }
-  };
-
-  // 当选择角色时，加载对应模型
-  const handleSelectCharacter = (id: string | null) => {
-    setActiveCharacterId(id);
-    if (id) {
-      const char = characters.find(c => c.id === id);
-      if (char) {
-        // 检查模型是否已加载
-        let model = characterModelsRef.current.get(id);
-        
-        if (!model && appRef.current && assetBase) {
-          // 尚未加载，加载模型
-          const modelUrl = `${assetBase}/${char.modelPath}`;
-          modelManager.loadCharacterModel(
-            appRef.current,
-            char.id,
-            modelUrl,
-            { x: char.x, y: char.y, scale: char.scale, opacity: char.opacity }
-          ).then(loadedModel => {
-            if (loadedModel) {
-              characterModelsRef.current.set(id, loadedModel);
-              modelRef.current = loadedModel;
-              updateCharacterZIndex();
-            }
-          });
-        } else if (model) {
-          modelRef.current = model;
-        } else {
-          // 没有 appRef，回退到旧的单模型方式
-          setSelectedModel(char.modelPath);
-        }
-      }
-    }
-  };
-
-  const handleImportWebGAL = (commands: any[]) => {
-    // 将 WebGAL 命令转换为 clips 并添加到时间线
-    const parser = new WebGALParser();
-    // 这里需要获取当前选中角色的 ID
-    const targetCharId = activeCharacterId || "default";
-    const clips = parser.commandsToClips(commands, targetCharId);
-    
-    // 添加到对应的时间线轨道
-    clips.forEach(clip => {
-      if (clip.kind === "model") {
-        // 切换模型
-        setSelectedModel(clip.modelUrl);
-      } else if (clip.kind === "motion") {
-        // 添加动作 clip
-        addMotionClip(clip.name);
-      } else if (clip.kind === "expression") {
-        // 添加表情 clip
-        addExprClip(clip.name);
-      } else if (clip.kind === "audio") {
-        // 添加音频 clip
-        // 需要实现 addAudioClipWithTime 函数
-      }
-    });
-    
-    alert(`已导入 ${clips.length} 个时间线片段`);
-  };
-
+  // —— 录制模式：是否只录制模型区域 —— //
+  const [useModelFrame, setUseModelFrame] = useState<boolean>(false);
+  
+  // —— WebGAL模式 —— //
+  const [showWebGALMode, setShowWebGALMode] = useState(false);
 
   // 初始化管理器
   const modelManager = ModelManager({
@@ -303,44 +136,18 @@ export default function Live2DView() {
 
   const setPlayheadSec = (sec: number) => setPlayhead(sec);
 
-  // ——— 播放（可指定角色） —— //
-  const playMotion = (group: string, targetCharacterId?: string) => {
+  // ——— 播放（广播到所有子模型） —— //
+  const playMotion = (group: string) => {
     if (!modelData?.motions[group]) return;
-    
-    if (targetCharacterId) {
-      // 针对特定角色播放
-      const model = characterModelsRef.current.get(targetCharacterId);
-      if (model) {
-        model.motion(group, 0, 3);
-      }
-    } else {
-      // 广播到所有模型
-      modelManager.forEachModel((m) => m.motion(group, 0, 3));
-    }
+    modelManager.forEachModel((m) => m.motion(group, 0, 3));
     setCurrentMotion(group);
   };
 
-  const applyExpression = (name: string, targetCharacterId?: string) => {
+  const applyExpression = (name: string) => {
     if (!modelData?.expressions?.length) return;
-    
-    if (targetCharacterId) {
-      // 针对特定角色应用
-      const model = characterModelsRef.current.get(targetCharacterId);
-      if (model) {
-        model.expression(name);
-      }
-    } else {
-      // 广播到所有模型
-      modelManager.forEachModel((m) => m.expression(name));
-    }
+    modelManager.forEachModel((m) => m.expression(name));
     setCurrentExpression(name);
   };
-
-
-
-
-
-
 
   const addMotionClip = async (name: string) => {
     if (!name) return;
@@ -351,19 +158,6 @@ export default function Live2DView() {
   const addExprClip = (name: string) => {
     if (!name) return;
     setExprClips((prev) => [...prev, { id: crypto.randomUUID(), name, start: nextEnd(prev), duration: exprDur }]);
-  };
-
-  // 添加参数关键帧 clip
-  const addParamClip = (paramId: string, paramValue: number, start?: number) => {
-    const clip: Clip = {
-      id: crypto.randomUUID(),
-      name: paramId,
-      start: start ?? nextEnd(paramClips),
-      duration: 0.1,
-      paramId,
-      paramValue
-    };
-    setParamClips((prev) => [...prev, clip]);
   };
 
   // 新增音频导入功能
@@ -444,12 +238,7 @@ export default function Live2DView() {
     }
   };
 
-  const timelineLength = Math.max(
-    nextEnd(motionClips), 
-    nextEnd(exprClips), 
-    nextEnd(audioClips),
-    nextEnd(paramClips)
-  );
+  const timelineLength = Math.max(nextEnd(motionClips), nextEnd(exprClips), nextEnd(audioClips));
 
   const tick = (ts: number) => {
     if (startTsRef.current == null) startTsRef.current = ts;
@@ -460,37 +249,19 @@ export default function Live2DView() {
     for (const c of motionClips) {
       if (t >= c.start && t < c.start + c.duration) {
         // 在片段持续时间内持续播放动作
-        playMotion(c.name, c.targetCharacter);
+        playMotion(c.name);
       }
     }
     for (const c of exprClips) {
       if (t >= c.start && t < c.start + c.duration) {
         // 在片段持续时间内持续应用表情
-        applyExpression(c.name, c.targetCharacter);
+        applyExpression(c.name);
       }
     }
 
     // 音频播放和动画处理
     audioManager.playAudioAtTime(t);
     audioManager.processAudioAnimation(t);
-
-    // 应用参数关键帧
-    for (const c of paramClips) {
-      if (t >= c.start && t < c.start + c.duration) {
-        if (c.paramId && c.paramValue !== undefined) {
-          modelManager.forEachModel((m: any) => {
-            try {
-              const im = m.internalModel;
-              if (im?.coreModel?.setParamFloat) {
-                im.coreModel.setParamFloat(c.paramId!, c.paramValue!);
-              }
-            } catch (e) {
-              // 忽略
-            }
-          });
-        }
-      }
-    }
 
     if (t >= timelineLength) {
       stopPlayback();
@@ -534,7 +305,7 @@ export default function Live2DView() {
     audioClips,
     recordingQuality,
     customRecordingBounds,
-    enableModelBoundsRecording,
+    useModelFrame,
     setRecState,
     setRecordingTime,
     setRecordingProgress,
@@ -560,36 +331,236 @@ export default function Live2DView() {
 
 
 
+  // 在WebGAL模型加载成功后清理本地模式模型
+  const cleanupLocalModeModelsAfterWebGAL = () => {
+    try {
+      console.log('🧹 WebGAL模型加载成功，开始清理本地模式模型...');
+      
+      // 这里不需要清理当前模型，因为当前显示的就是WebGAL模型
+      // 只需要重置本地模式相关的状态
+      setModelData(null);
+      setCustomRecordingBounds({ x: 0, y: 0, width: 0, height: 0 });
+      
+      console.log('✅ 本地模式状态已清理，WebGAL模型保持显示');
+      
+    } catch (error) {
+      console.warn('⚠️ 清理本地模式状态时出现警告:', error);
+    }
+  };
 
 
 
-  // 重置为模型边框
+  // 退出WebGAL模式时的清理
+  const exitWebGALMode = () => {
+    try {
+      console.log('🚪 退出WebGAL模式，开始清理...');
+      
+      // 清理WebGAL模式的模型
+      if (modelManager) {
+        modelManager.cleanupCurrentModel();
+      }
+      
+      console.log('🏷️ WebGAL模式状态已重置');
+      
+      // 清理时间线
+      clearTimeline();
+      
+      console.log('✅ WebGAL模式退出完成');
+      
+    } catch (error) {
+      console.warn('⚠️ 退出WebGAL模式时出现警告:', error);
+    }
+  };
+
+    // 导入WebGAL时间线
+  const importWebGALTimeline = async (commands: any[]) => {
+    try {
+      console.log('🎭 进入WebGAL模式');
+      
+      console.log('📝 设置WebGAL命令状态，命令数量:', commands.length);
+      
+      const parser = new WebGALParser();
+
+    let currentTime = 0;
+
+    for (const command of commands) {
+      if (command.type === 'changeFigure') {
+        const figure = command.data;
+
+        if (figure.path) {
+          try {
+            // 解析为完整的figure路径（包含正确端口）
+            const resolved = parser.resolveFigurePath(figure.path);
+            console.log('🧭 解析后的模型路径:', resolved);
+
+            // 尝试加载模型到Live2D视图
+            try {
+              // 使用通用的loadAnyModel方法加载模型
+              await modelManager.loadAnyModel(appRef.current!, resolved);
+              console.log('✅ 模型加载成功:', resolved);
+              
+              // WebGAL模式成功加载模型后，清理本地模式的旧模型
+              // 注意：这里清理的是本地模式，不是刚加载的WebGAL模型
+              cleanupLocalModeModelsAfterWebGAL();
+              
+            } catch (loadError) {
+              console.error('❌ 模型加载失败:', {
+                originalPath: figure.path,
+                resolvedPath: resolved,
+                error: loadError instanceof Error ? loadError.message : String(loadError)
+              });
+            }
+          } catch (error) {
+            console.error('❌ 模型路径解析失败:', {
+              originalPath: figure.path,
+              error: error instanceof Error ? error.message : String(error)
+            });
+          }
+        }
+
+        // 同时添加 motion/expression 到时间线
+        if (figure.motion || figure.expression) {
+          const startTime = currentTime;
+          const duration = 2.0;
+
+          if (figure.motion) {
+            setMotionClips(prev => [...prev, {
+              id: crypto.randomUUID(),
+              name: figure.motion,
+              start: startTime,
+              duration
+            }]);
+          }
+
+          if (figure.expression) {
+            setExprClips(prev => [...prev, {
+              id: crypto.randomUUID(),
+              name: figure.expression,
+              start: startTime,
+              duration
+            }]);
+          }
+
+          currentTime += duration;
+        }
+      } else if (command.type === 'dialogue') {
+        const dialogue = command.data;
+
+        // 解析音频路径
+        const audioAbs = parser.resolveAudioPath(dialogue.audioPath);
+
+        if (audioAbs) {
+          try {
+            const audio = new Audio(audioAbs);
+            await new Promise((resolve) => {
+              audio.onloadedmetadata = resolve;
+              audio.load();
+            });
+
+            const duration = audio.duration || 3.0;
+
+            const audioClip = {
+              id: crypto.randomUUID(),
+              name: `${dialogue.speaker ?? ''}: ${dialogue.text.substring(0, 20)}...`,
+              start: currentTime,
+              duration,
+              audioUrl: audioAbs
+            };
+
+            setAudioClips(prev => [...prev, audioClip]);
+
+            // 音频分析管线
+            audioManager.audioRefs.current.set(audioClip.id, audio);
+            if (audioManager.audioContextRef.current) {
+              try {
+                const source = audioManager.audioContextRef.current.createMediaElementSource(audio);
+                const analyzer = audioManager.audioContextRef.current.createAnalyser();
+                analyzer.fftSize = 256;
+                analyzer.smoothingTimeConstant = 0.8;
+
+                source.connect(analyzer);
+                analyzer.connect(audioManager.audioContextRef.current.destination);
+
+                audioManager.audioAnalyzersRef.current.set(audioClip.id, { source, analyzer });
+              } catch (error) {
+                console.warn('音频分析器设置失败:', error);
+              }
+            }
+
+            currentTime += duration;
+          } catch (error) {
+            console.warn('音频加载失败:', error);
+            currentTime += 3.0;
+          }
+        } else {
+          currentTime += 2.0; // 没有音频，默认时长
+        }
+      }
+    }
+
+    console.log(`✅ 成功导入 ${commands.length} 个 WebGAL 命令，总时长: ${currentTime.toFixed(2)}s`);
+  } catch (error) {
+    console.error('导入WebGAL时间线失败:', error);
+    alert('导入失败: ' + error);
+  }
+};
+
+
+  // 重置为模型边框 - 使用 getBounds() 获取准确的屏幕坐标
   const resetToModelBounds = () => {
+    if (!appRef.current) return;
+
     if (modelRef.current) {
       if (Array.isArray(modelRef.current)) {
-        // 复合模型
+        // 复合模型 - 使用容器的 getBounds
         if (groupContainerRef.current) {
           const b = groupContainerRef.current.getBounds();
           setCustomRecordingBounds({
             x: Math.max(0, b.x),
             y: Math.max(0, b.y),
-            width: Math.min(b.width, window.innerWidth),
-            height: Math.min(b.height, window.innerHeight),
+            width: Math.max(100, Math.min(b.width, window.innerWidth)),
+            height: Math.max(100, Math.min(b.height, window.innerHeight)),
           });
         }
       } else {
-        // 单模型
+        // 单模型 - 使用 getBounds() 获取实际渲染边界
         const model = modelRef.current;
-        const modelWidth = model.width * model.scale.x;
-        const modelHeight = model.height * model.scale.y;
-        const modelX = model.position.x - modelWidth / 2;
-        const modelY = model.position.y - modelHeight / 2;
-        setCustomRecordingBounds({
-          x: Math.max(0, modelX),
-          y: Math.max(0, modelY),
-          width: Math.min(modelWidth, window.innerWidth),
-          height: Math.min(modelHeight, window.innerHeight),
-        });
+        try {
+          // 尝试使用 getBounds 获取实际显示区域
+          const b = (model as any).getBounds?.() || model.getLocalBounds?.();
+          if (b && b.width > 0 && b.height > 0) {
+            setCustomRecordingBounds({
+              x: Math.max(0, b.x),
+              y: Math.max(0, b.y),
+              width: Math.max(100, Math.min(b.width, window.innerWidth)),
+              height: Math.max(100, Math.min(b.height, window.innerHeight)),
+            });
+          } else {
+            // 回退：使用 scale 和 position 计算
+            const modelWidth = model.width * model.scale.x;
+            const modelHeight = model.height * model.scale.y;
+            const modelX = model.position.x - modelWidth / 2;
+            const modelY = model.position.y - modelHeight / 2;
+            setCustomRecordingBounds({
+              x: Math.max(0, modelX),
+              y: Math.max(0, modelY),
+              width: Math.max(100, Math.min(modelWidth, window.innerWidth)),
+              height: Math.max(100, Math.min(modelHeight, window.innerHeight)),
+            });
+          }
+        } catch (e) {
+          // 回退方案
+          const modelWidth = model.width * model.scale.x;
+          const modelHeight = model.height * model.scale.y;
+          const modelX = model.position.x - modelWidth / 2;
+          const modelY = model.position.y - modelHeight / 2;
+          setCustomRecordingBounds({
+            x: Math.max(0, modelX),
+            y: Math.max(0, modelY),
+            width: Math.max(100, Math.min(modelWidth, window.innerWidth)),
+            height: Math.max(100, Math.min(modelHeight, window.innerHeight)),
+          });
+        }
       }
     }
   };
@@ -818,13 +789,20 @@ export default function Live2DView() {
          onBoundsChange={setCustomRecordingBounds}
        />
 
-
+       {/* WebGAL模式 */}
+               {showWebGALMode && (
+          <WebGALMode
+            onClose={() => setShowWebGALMode(false)}
+            onImportTimeline={importWebGALTimeline}
+            onExitWebGALMode={exitWebGALMode}
+          />
+        )}
 
       {/* 控制面板 */}
       {showControls && (
                  <ControlPanel
            onClose={() => setShowControls(false)}
-
+           onToggleWebGALMode={() => setShowWebGALMode(!showWebGALMode)}
 
           // 模型选择
           modelList={modelList}
@@ -863,67 +841,18 @@ export default function Live2DView() {
           onSetPlayhead={setPlayheadSec}
           currentAudioLevel={currentAudioLevel}
         />
-
-        {/* 面板切换按钮 */}
-        <div className="panel-toggle-buttons">
-          <button
-            className={`panel-toggle-btn ${!showCharacterPanel && editorMode === "timeline" ? "active" : ""}`}
-            onClick={() => { setShowCharacterPanel(false); setEditorMode("timeline"); }}
-          >
-            🎛️ 模型
-          </button>
-          <button
-            className={`panel-toggle-btn ${showCharacterPanel ? "active" : ""}`}
-            onClick={() => { setShowCharacterPanel(true); setEditorMode("timeline"); }}
-          >
-            🎭 角色
-          </button>
-          <button
-            className={`panel-toggle-btn ${editorMode === "parameter" ? "active" : ""}`}
-            onClick={() => { setShowCharacterPanel(false); setEditorMode("parameter"); }}
-          >
-            🎢 参数
-          </button>
-        </div>
-
-        {/* 角色管理面板 */}
-        {showCharacterPanel && (
-          <CharacterPanel
-            characters={characters}
-            activeCharacterId={activeCharacterId}
-            onAddCharacter={handleAddCharacter}
-            onRemoveCharacter={handleRemoveCharacter}
-            onSelectCharacter={handleSelectCharacter}
-            onUpdateCharacter={handleUpdateCharacter}
-            onImportWebGAL={handleImportWebGAL}
-            modelList={modelList}
-          />
-        )}
-
-        {/* 参数编辑器面板 */}
-        {editorMode === "parameter" && (
-          <ParameterEditor
-            model={modelRef.current as any}
-            isComposite={isCompositeRef.current}
-            subModels={modelManager.getSubModels()}
-            onParameterChange={modelManager.getAllSubModelParameters}
-            onSetParameter={modelManager.setModelParameter}
-          />
-        )}
       )}
 
       {/* 时间线 */}
       <Timeline
         motionClips={motionClips}
         exprClips={exprClips}
-        paramClips={paramClips}
         audioClips={audioClips}
         playheadSec={playhead}
         onChangeClip={changeClip}
         onRemoveClip={(track, id) => {
           if (track === "motion") setMotionClips(prev => prev.filter(c => c.id !== id));
           else if (track === "expr") setExprClips(prev => prev.filter(c => c.id !== id));
-          else if (track === "param") setParamClips(prev => prev.filter(c => c.id !== id));
           else if (track === "audio") {
             setAudioClips(prev => prev.filter(c => c.id !== id));
             // 清理音频引用
@@ -956,8 +885,8 @@ export default function Live2DView() {
         setShowRecordingBounds={setShowRecordingBounds}
         customRecordingBounds={customRecordingBounds}
         setCustomRecordingBounds={setCustomRecordingBounds}
-        enableModelBoundsRecording={enableModelBoundsRecording}
-        setEnableModelBoundsRecording={setEnableModelBoundsRecording}
+        useModelFrame={useModelFrame}
+        setUseModelFrame={setUseModelFrame}
         recordingQuality={recordingQuality}
         setRecordingQuality={setRecordingQuality}
         transparentBg={transparentBg}
