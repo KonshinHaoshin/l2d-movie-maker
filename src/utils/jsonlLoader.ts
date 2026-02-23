@@ -103,6 +103,7 @@ export function validateJsonlFile(jsonlText: string): boolean {
       if (hasModelLine && hasAggregateLine) {
         return true;
       }
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
     } catch (e) {
       // 忽略解析错误的行
     }
