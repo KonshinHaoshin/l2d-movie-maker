@@ -62,7 +62,7 @@ fn handle_req(req: Request, model_root: &PathBuf) {
     let url = req.url().to_string();
     
     // 支持 /model/... 和 /figure/... 路由
-    let (prefix, rel) = if url.starts_with("/model/") {
+    let (_prefix, rel) = if url.starts_with("/model/") {
         ("/model/", url.strip_prefix("/model/").unwrap_or(""))
     } else if url.starts_with("/figure/") {
         ("/figure/", url.strip_prefix("/figure/").unwrap_or(""))
@@ -93,9 +93,14 @@ fn handle_req(req: Request, model_root: &PathBuf) {
     // 读取文件
     match std::fs::read(&path) {
         Ok(bytes) => {
-            let mime = mime_guess::from_path(&path).first_or_octet_stream();
+            // 特殊处理 .jsonl 文件，设置正确的 Content-Type
             let mut resp = Response::from_data(bytes);
-            resp.add_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], mime.as_ref()).unwrap());
+            if path.extension().and_then(|ext| ext.to_str()).map(|s| s.eq_ignore_ascii_case("jsonl")).unwrap_or(false) {
+                resp.add_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap());
+            } else {
+                let mime = mime_guess::from_path(&path).first_or_octet_stream();
+                resp.add_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], mime.as_ref().as_bytes()).unwrap());
+            }
             // 允许跨源（前端是 http://localhost）
             resp.add_header(tiny_http::Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap());
             let _ = req.respond(resp);
@@ -142,9 +147,14 @@ fn handle_req_with_roots(req: Request, model_root: &PathBuf, figure_root: &PathB
     // 读取文件
     match std::fs::read(&path) {
         Ok(bytes) => {
-            let mime = mime_guess::from_path(&path).first_or_octet_stream();
+            // 特殊处理 .jsonl 文件，设置正确的 Content-Type
             let mut resp = Response::from_data(bytes);
-            resp.add_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], mime.as_ref()).unwrap());
+            if path.extension().and_then(|ext| ext.to_str()).map(|s| s.eq_ignore_ascii_case("jsonl")).unwrap_or(false) {
+                resp.add_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap());
+            } else {
+                let mime = mime_guess::from_path(&path).first_or_octet_stream();
+                resp.add_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], mime.as_ref().as_bytes()).unwrap());
+            }
             // 允许跨源（前端是 http://localhost）
             resp.add_header(tiny_http::Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap());
             let _ = req.respond(resp);

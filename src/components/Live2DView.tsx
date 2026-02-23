@@ -12,10 +12,10 @@ import ExportToolbar from "./ExportToolbar";
 import ModelManager from "./ModelManager";
 import AudioManager from "./AudioManager";
 import RecordingManager from "./RecordingManager";
-import WebGALMode from "./WebGALMode";
+
 // import { convertFileSrc } from "@tauri-apps/api/core";
 // import { normalizePath } from "../utils/fs";
-import { WebGALParser } from "../utils/webgalParser";
+
 import { invoke } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { appCacheDir, BaseDirectory, join } from "@tauri-apps/api/path";
@@ -86,12 +86,12 @@ export default function Live2DView() {
   // —— 用户自定义录制范围 —— //
   const [customRecordingBounds, setCustomRecordingBounds] = useState({ x: 0, y: 0, width: 800, height: 600 });
   const [showRecordingBounds, setShowRecordingBounds] = useState(false);
+  const [enableModelBoundsRecording, setEnableModelBoundsRecording] = useState(false);
    
   // —— 录制质量设置 —— //
   const [recordingQuality, setRecordingQuality] = useState<"low" | "medium" | "high">("medium");
   
-  // —— WebGAL模式 —— //
-  const [showWebGALMode, setShowWebGALMode] = useState(false);
+
 
   // 初始化管理器
   const modelManager = ModelManager({
@@ -145,6 +145,12 @@ export default function Live2DView() {
     modelManager.forEachModel((m) => m.expression(name));
     setCurrentExpression(name);
   };
+
+
+
+
+
+
 
   const addMotionClip = async (name: string) => {
     if (!name) return;
@@ -301,6 +307,8 @@ export default function Live2DView() {
     exprClips,
     audioClips,
     recordingQuality,
+    customRecordingBounds,
+    enableModelBoundsRecording,
     setRecState,
     setRecordingTime,
     setRecordingProgress,
@@ -326,179 +334,7 @@ export default function Live2DView() {
 
 
 
-  // 在WebGAL模型加载成功后清理本地模式模型
-  const cleanupLocalModeModelsAfterWebGAL = () => {
-    try {
-      console.log('🧹 WebGAL模型加载成功，开始清理本地模式模型...');
-      
-      // 这里不需要清理当前模型，因为当前显示的就是WebGAL模型
-      // 只需要重置本地模式相关的状态
-      setModelData(null);
-      setCustomRecordingBounds({ x: 0, y: 0, width: 0, height: 0 });
-      
-      console.log('✅ 本地模式状态已清理，WebGAL模型保持显示');
-      
-    } catch (error) {
-      console.warn('⚠️ 清理本地模式状态时出现警告:', error);
-    }
-  };
 
-
-
-  // 退出WebGAL模式时的清理
-  const exitWebGALMode = () => {
-    try {
-      console.log('🚪 退出WebGAL模式，开始清理...');
-      
-      // 清理WebGAL模式的模型
-      if (modelManager) {
-        modelManager.cleanupCurrentModel();
-      }
-      
-      console.log('🏷️ WebGAL模式状态已重置');
-      
-      // 清理时间线
-      clearTimeline();
-      
-      console.log('✅ WebGAL模式退出完成');
-      
-    } catch (error) {
-      console.warn('⚠️ 退出WebGAL模式时出现警告:', error);
-    }
-  };
-
-    // 导入WebGAL时间线
-  const importWebGALTimeline = async (commands: any[]) => {
-    try {
-      console.log('🎭 进入WebGAL模式');
-      
-      console.log('📝 设置WebGAL命令状态，命令数量:', commands.length);
-      
-      const parser = new WebGALParser();
-
-    let currentTime = 0;
-
-    for (const command of commands) {
-      if (command.type === 'changeFigure') {
-        const figure = command.data;
-
-        if (figure.path) {
-          try {
-            // 解析为完整的figure路径（包含正确端口）
-            const resolved = parser.resolveFigurePath(figure.path);
-            console.log('🧭 解析后的模型路径:', resolved);
-
-            // 尝试加载模型到Live2D视图
-            try {
-              // 使用通用的loadAnyModel方法加载模型
-              await modelManager.loadAnyModel(appRef.current!, resolved);
-              console.log('✅ 模型加载成功:', resolved);
-              
-              // WebGAL模式成功加载模型后，清理本地模式的旧模型
-              // 注意：这里清理的是本地模式，不是刚加载的WebGAL模型
-              cleanupLocalModeModelsAfterWebGAL();
-              
-            } catch (loadError) {
-              console.error('❌ 模型加载失败:', {
-                originalPath: figure.path,
-                resolvedPath: resolved,
-                error: loadError instanceof Error ? loadError.message : String(loadError)
-              });
-            }
-          } catch (error) {
-            console.error('❌ 模型路径解析失败:', {
-              originalPath: figure.path,
-              error: error instanceof Error ? error.message : String(error)
-            });
-          }
-        }
-
-        // 同时添加 motion/expression 到时间线
-        if (figure.motion || figure.expression) {
-          const startTime = currentTime;
-          const duration = 2.0;
-
-          if (figure.motion) {
-            setMotionClips(prev => [...prev, {
-              id: crypto.randomUUID(),
-              name: figure.motion,
-              start: startTime,
-              duration
-            }]);
-          }
-
-          if (figure.expression) {
-            setExprClips(prev => [...prev, {
-              id: crypto.randomUUID(),
-              name: figure.expression,
-              start: startTime,
-              duration
-            }]);
-          }
-
-          currentTime += duration;
-        }
-      } else if (command.type === 'dialogue') {
-        const dialogue = command.data;
-
-        // 解析音频路径
-        const audioAbs = parser.resolveAudioPath(dialogue.audioPath);
-
-        if (audioAbs) {
-          try {
-            const audio = new Audio(audioAbs);
-            await new Promise((resolve) => {
-              audio.onloadedmetadata = resolve;
-              audio.load();
-            });
-
-            const duration = audio.duration || 3.0;
-
-            const audioClip = {
-              id: crypto.randomUUID(),
-              name: `${dialogue.speaker ?? ''}: ${dialogue.text.substring(0, 20)}...`,
-              start: currentTime,
-              duration,
-              audioUrl: audioAbs
-            };
-
-            setAudioClips(prev => [...prev, audioClip]);
-
-            // 音频分析管线
-            audioManager.audioRefs.current.set(audioClip.id, audio);
-            if (audioManager.audioContextRef.current) {
-              try {
-                const source = audioManager.audioContextRef.current.createMediaElementSource(audio);
-                const analyzer = audioManager.audioContextRef.current.createAnalyser();
-                analyzer.fftSize = 256;
-                analyzer.smoothingTimeConstant = 0.8;
-
-                source.connect(analyzer);
-                analyzer.connect(audioManager.audioContextRef.current.destination);
-
-                audioManager.audioAnalyzersRef.current.set(audioClip.id, { source, analyzer });
-              } catch (error) {
-                console.warn('音频分析器设置失败:', error);
-              }
-            }
-
-            currentTime += duration;
-          } catch (error) {
-            console.warn('音频加载失败:', error);
-            currentTime += 3.0;
-          }
-        } else {
-          currentTime += 2.0; // 没有音频，默认时长
-        }
-      }
-    }
-
-    console.log(`✅ 成功导入 ${commands.length} 个 WebGAL 命令，总时长: ${currentTime.toFixed(2)}s`);
-  } catch (error) {
-    console.error('导入WebGAL时间线失败:', error);
-    alert('导入失败: ' + error);
-  }
-};
 
 
   // 重置为模型边框
@@ -756,20 +592,13 @@ export default function Live2DView() {
          onBoundsChange={setCustomRecordingBounds}
        />
 
-       {/* WebGAL模式 */}
-               {showWebGALMode && (
-          <WebGALMode
-            onClose={() => setShowWebGALMode(false)}
-            onImportTimeline={importWebGALTimeline}
-            onExitWebGALMode={exitWebGALMode}
-          />
-        )}
+
 
       {/* 控制面板 */}
       {showControls && (
                  <ControlPanel
            onClose={() => setShowControls(false)}
-           onToggleWebGALMode={() => setShowWebGALMode(!showWebGALMode)}
+
 
           // 模型选择
           modelList={modelList}
@@ -852,6 +681,8 @@ export default function Live2DView() {
         setShowRecordingBounds={setShowRecordingBounds}
         customRecordingBounds={customRecordingBounds}
         setCustomRecordingBounds={setCustomRecordingBounds}
+        enableModelBoundsRecording={enableModelBoundsRecording}
+        setEnableModelBoundsRecording={setEnableModelBoundsRecording}
         recordingQuality={recordingQuality}
         setRecordingQuality={setRecordingQuality}
         transparentBg={transparentBg}

@@ -244,6 +244,8 @@ export default function ModelManager({
 
   const loadJsonlComposite = async (app: PIXI.Application, jsonlUrl: string) => {
     try {
+      console.log('🔄 开始加载 JSONL 复合模型:', jsonlUrl);
+      
       const response = await fetch(jsonlUrl, { cache: "no-cache" });
       
       // 检查响应状态和内容类型
@@ -252,6 +254,7 @@ export default function ModelManager({
       }
       
       const text = await response.text();
+      console.log('📄 JSONL 文件内容长度:', text.length);
       
       // 检查是否是HTML内容（文件不存在时的回退页面）
       if (text.includes('<!DOCTYPE html>') || text.includes('<html')) {
@@ -259,6 +262,7 @@ export default function ModelManager({
       }
       
       const lines = text.split("\n").filter(Boolean);
+      console.log('📝 解析到 JSONL 行数:', lines.length);
 
       const parts: JsonlPart[] = [];
       let summary: { motions?: string[]; expressions?: string[]; import?: number } = {};
@@ -266,8 +270,11 @@ export default function ModelManager({
       for (const line of lines) {
         try {
           const obj = JSON.parse(line);
+          console.log('📋 解析 JSONL 行:', obj);
+          
           // 汇总行（最后一行）：含 motions 或 expressions
           if (obj?.motions || obj?.expressions) {
+            console.log('📊 发现汇总行:', { motions: obj.motions, expressions: obj.expressions, import: obj.import });
             if (Array.isArray(obj.motions)) summary.motions = obj.motions;
             if (Array.isArray(obj.expressions)) summary.expressions = obj.expressions;
             if (obj.import !== undefined) summary.import = Number(obj.import);
@@ -277,6 +284,7 @@ export default function ModelManager({
             const fullPath = obj.path.startsWith("game/")
               ? obj.path
               : resolveRelativeFrom(jsonlUrl, obj.path.replace(/^\.\//, ""));
+            console.log('🎯 发现模型路径:', { original: obj.path, resolved: fullPath });
             parts.push({
               path: fullPath,
               id: obj.id,
@@ -286,8 +294,8 @@ export default function ModelManager({
               yscale: obj.yscale,
             });
           }
-        } catch {
-          console.warn("JSONL parse error in line:", line);
+        } catch (parseError) {
+          console.warn("❌ JSONL 行解析失败:", line, parseError);
         }
       }
 
@@ -309,9 +317,13 @@ export default function ModelManager({
 
       // 加载子模型
       const children: Live2DModel[] = [];
+      console.log('🚀 开始加载子模型，共', parts.length, '个');
+      
       for (const p of parts) {
         try {
+          console.log('📦 加载子模型:', p.path);
           const m = await Live2DModel.from(p.path, { autoInteract: false });
+          console.log('✅ 子模型加载成功:', p.path);
           m.visible = false;
           m.anchor.set(0.5);
 
