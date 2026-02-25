@@ -20,7 +20,7 @@ interface RecordingManagerProps {
   recordingQuality: "low" | "medium" | "high";
   customRecordingBounds?: { x: number; y: number; width: number; height: number };
   useModelFrame?: boolean;
-  setRecState: (state: "idle" | "rec" | "done") => void;
+  setRecState: (state: "idle" | "rec" | "done" | "offline") => void;
   setRecordingTime: (time: number) => void;
   setRecordingProgress: (progress: number) => void;
   setBlob: (blob: Blob | null) => void;

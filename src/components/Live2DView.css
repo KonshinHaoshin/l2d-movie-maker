@@ -737,6 +737,25 @@
     cursor: not-allowed;
 }
 
+.offline-button {
+    background: #0ea5e9;
+    color: #fff;
+    border: none;
+    padding: 8px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.offline-button:hover {
+    background: #0284c7;
+}
+
+.offline-button:disabled {
+    background: #6c757d;
+    cursor: not-allowed;
+}
+
 .stop-button {
     background: #ff6b6b;
     color: #fff;

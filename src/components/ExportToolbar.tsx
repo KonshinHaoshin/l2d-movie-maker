@@ -16,7 +16,7 @@ interface ExportToolbarProps {
   setRecordingQuality: (quality: "low" | "medium" | "high") => void;
   transparentBg: boolean;
   setTransparentBg: (transparent: boolean) => void;
-  recState: "idle" | "rec" | "done";
+  recState: "idle" | "rec" | "done" | "offline";
   recordingTime: number;
   recordingProgress: number;
   blob: Blob | null;
@@ -24,6 +24,7 @@ interface ExportToolbarProps {
   onStopRecording: () => void;
   onSaveWebM: () => void;
   onConvertToMov: () => void;
+  onStartOfflineExport: () => void;
   onTakeScreenshot: () => void;
   onTakePartsScreenshots: () => void;
   onResetToModelBounds: () => void;
