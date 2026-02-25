@@ -13,7 +13,7 @@ export function pickVp9Mime(): string | null {
   return null;
 }
 
-// 音频管理器
+// 音频管理�?
 function createAudioManager(
   ac: AudioContext,
   audioDestination: MediaStreamAudioDestinationNode,
@@ -81,7 +81,7 @@ function createAudioManager(
   return { setupAudioTracks, startAudioPlayback, stopAllAudio, cleanup };
 }
 
-// 全屏录制器
+// 全屏录制�?
 export function createVp9AlphaRecorder(
   canvas: HTMLCanvasElement,
   fps = 60,
@@ -126,7 +126,6 @@ export function createVp9AlphaRecorder(
     mr.onerror = (e) => console.error("[rec] error:", e);
     mr.ondataavailable = (e) => { if (e.data?.size) chunks.push(e.data); };
     mr.onstart = () => {
-      console.log("[rec] started", mime);
       if (options?.onProgress) {
         progressInterval = window.setInterval(() => {
           options.onProgress!((Date.now() - recordingStartTime) / 1000);
@@ -137,7 +136,6 @@ export function createVp9AlphaRecorder(
       }
     };
     mr.onstop = () => {
-      console.log("[rec] stopped, chunks:", chunks.length);
       if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
       audioManager?.stopAllAudio();
     };
@@ -177,7 +175,7 @@ export function createVp9AlphaRecorder(
   return { start, stop, cleanup, saveWebM, getRecordingTime, isRecording };
 }
 
-// 模型区域录制器 - 支持音频+透明背景
+// 模型区域录制�?- 支持音频+透明背景
 export function createModelFrameRecorder(
   canvas: HTMLCanvasElement,
   modelBounds: { x: number; y: number; width: number; height: number },
@@ -253,7 +251,6 @@ export function createModelFrameRecorder(
     mr.onerror = (e) => console.error("[rec] error:", e);
     mr.ondataavailable = (e) => { if (e.data?.size) chunks.push(e.data); };
     mr.onstart = () => {
-      console.log("[rec] crop recording started", mime);
       if (options?.onProgress) {
         progressInterval = window.setInterval(() => {
           options.onProgress!((Date.now() - recordingStartTime) / 1000);
@@ -272,7 +269,6 @@ export function createModelFrameRecorder(
       rafId = requestAnimationFrame(loop);
     };
     mr.onstop = () => {
-      console.log("[rec] stopped, chunks:", chunks.length);
       if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
       if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
       audioManager?.stopAllAudio();
@@ -287,7 +283,6 @@ export function createModelFrameRecorder(
       mr.onstop = () => {
         const blob = new Blob(chunks, { type: mr!.mimeType });
         cleanup();
-        console.log("[rec] crop blob size:", blob.size);
         resolve(blob);
       };
       mr.stop();
@@ -315,3 +310,4 @@ export function createModelFrameRecorder(
 
   return { start, stop, cleanup, saveWebM, getRecordingTime, isRecording };
 }
+

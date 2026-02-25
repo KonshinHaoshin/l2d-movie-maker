@@ -521,15 +521,16 @@
     position: absolute;
     pointer-events: auto;
     z-index: 999;
-    border: 2px solid #000000;
-    box-shadow: 0 0 10px rgba(0,0,0,0.5);
+    border: 2px solid #ff3b30;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.75), 0 0 10px rgba(0,0,0,0.45);
     cursor: move;
+    user-select: none;
 }
 
 /* 调整大小的手柄 */
 .resize-handle {
     position: absolute;
-    background: #000000;
+    background: #ff3b30;
     border: 1px solid #ffffff;
     cursor: nw-resize;
 }
@@ -587,6 +588,12 @@
 .recording-bounds-checkbox {
     width: 16px;
     height: 16px;
+}
+
+/* Failsafe: hide deprecated manual recording-bounds toggle in stale UI paths */
+#showRecordingBounds,
+label[for="showRecordingBounds"] {
+    display: none !important;
 }
 
 .recording-bounds-label {
