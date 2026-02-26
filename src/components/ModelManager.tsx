@@ -172,6 +172,8 @@ export default function ModelManager({
   const loadSingleModel = async (app: PIXI.Application, url: string) => {
     try {
       const model = await Live2DModel.from(url);
+      (model as any).__characterId = "main";
+      (model as any).__characterLabel = "主模型";
       modelRef.current = model;
       isCompositeRef.current = false;
       motionBaseRef.current = url.slice(0, url.lastIndexOf("/") + 1);
@@ -307,6 +309,10 @@ export default function ModelManager({
       for (const p of parts) {
         try {
           const m = await Live2DModel.from(p.path, { autoInteract: false });
+          const roleIndex = children.length + 1;
+          const roleId = (p.id && String(p.id).trim()) || `role-${roleIndex}`;
+          (m as any).__characterId = roleId;
+          (m as any).__characterLabel = (p.id && String(p.id).trim()) || `角色 ${roleIndex}`;
           m.visible = false;
           m.anchor.set(0.5);
 
