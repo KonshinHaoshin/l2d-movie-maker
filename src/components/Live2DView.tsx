@@ -69,9 +69,13 @@ export default function Live2DView() {
   const [playhead, setPlayhead] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentAudioLevel, setCurrentAudioLevel] = useState(0); // ??????
+  const [currentFps, setCurrentFps] = useState(0);
 
   const rafRef = useRef<number | null>(null);
   const startTsRef = useRef<number | null>(null);
+  const fpsRafRef = useRef<number | null>(null);
+  const fpsFrameCountRef = useRef(0);
+  const fpsLastTsRef = useRef<number | null>(null);
 
   // ????????
   const [motionDur, setMotionDur] = useState(2);
@@ -359,6 +363,38 @@ export default function Live2DView() {
     // ?????????
     audioManager.stopAllAudio();
   };
+
+  // ???????? FPS????????????????????? Live2D Control
+  useEffect(() => {
+    let disposed = false;
+
+    const fpsTick = (ts: number) => {
+      if (disposed) return;
+      if (fpsLastTsRef.current == null) fpsLastTsRef.current = ts;
+
+      fpsFrameCountRef.current += 1;
+      const elapsed = ts - fpsLastTsRef.current;
+
+      if (elapsed >= 500) {
+        const fps = (fpsFrameCountRef.current * 1000) / elapsed;
+        setCurrentFps(Math.max(0, Math.min(240, fps)));
+        fpsFrameCountRef.current = 0;
+        fpsLastTsRef.current = ts;
+      }
+
+      fpsRafRef.current = requestAnimationFrame(fpsTick);
+    };
+
+    fpsRafRef.current = requestAnimationFrame(fpsTick);
+    return () => {
+      disposed = true;
+      if (fpsRafRef.current) cancelAnimationFrame(fpsRafRef.current);
+      fpsRafRef.current = null;
+      fpsFrameCountRef.current = 0;
+      fpsLastTsRef.current = null;
+      setCurrentFps(0);
+    };
+  }, []);
 
   // ??????
   const startRecording = () => {
@@ -1026,6 +1062,7 @@ export default function Live2DView() {
           onChangeClip={changeClip}
           onSetPlayhead={setPlayheadSec}
           currentAudioLevel={currentAudioLevel}
+          currentFps={currentFps}
         />
       )}
 

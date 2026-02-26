@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Clip, TrackKind } from "./types";
 
 type Props = {
@@ -19,9 +19,10 @@ type Props = {
 const MIN_CLIP_SEC = 0.1;
 const GRID_STEP_SEC = 0.1;
 const DEFAULT_PPS = 80;
-const TRACK_H = 40;
-const CLIP_H = 32;
+const TRACK_H = 56;
+const CLIP_H = 40;
 const HANDLE_W = 8;
+const RULER_H = 30;
 
 type DragKind =
   | { mode: "move"; track: TrackKind; id: string; start0: number; mouseX0: number }
@@ -68,26 +69,33 @@ export default function Timeline({
   );
 
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const timeAreaRef = useRef<HTMLDivElement | null>(null);
   const [drag, setDrag] = useState<DragKind>(null);
 
+  const getTimelineX = (clientX: number) => {
+    const timeArea = timeAreaRef.current;
+    if (!timeArea) return 0;
+    const rect = timeArea.getBoundingClientRect();
+    return clientX - rect.left + timeArea.scrollLeft;
+  };
+
   useEffect(() => {
-    const wrap = wrapRef.current;
-    if (!wrap) return;
+    const timeArea = timeAreaRef.current;
+    if (!timeArea) return;
     const onWheel = (e: WheelEvent) => {
       if (!e.altKey) return;
       e.preventDefault();
       const factor = e.deltaY > 0 ? 0.9 : 1.1;
       setPps(pps * factor);
     };
-    wrap.addEventListener("wheel", onWheel, { passive: false });
-    return () => wrap.removeEventListener("wheel", onWheel);
+    timeArea.addEventListener("wheel", onWheel, { passive: false });
+    return () => timeArea.removeEventListener("wheel", onWheel);
   }, [pps]);
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
-      if (!drag || !wrapRef.current) return;
-      const rect = wrapRef.current.getBoundingClientRect();
-      const x = e.clientX - rect.left;
+      if (!drag) return;
+      const x = getTimelineX(e.clientX);
 
       if (drag.mode === "move") {
         const dx = (x - drag.mouseX0) / pps;
@@ -114,7 +122,7 @@ export default function Timeline({
 
       if (drag.mode === "playhead") {
         const dx = (x - drag.mouseX0) / pps;
-        onSetPlayhead?.(Math.max(0, drag.playhead0 + dx));
+        onSetPlayhead?.(Math.max(0, snap(drag.playhead0 + dx)));
       }
     };
 
@@ -137,8 +145,7 @@ export default function Timeline({
         className="tl-ruler"
         title="Double-click to start playback"
         onMouseDown={(e) => {
-          if (!wrapRef.current) return;
-          const x = e.clientX - wrapRef.current.getBoundingClientRect().left;
+          const x = getTimelineX(e.clientX);
           setDrag({ mode: "playhead", mouseX0: x, playhead0: playheadSec });
           onSetPlayhead?.(snap(Math.max(0, x / pps)));
         }}
@@ -149,7 +156,7 @@ export default function Timeline({
         }}
         style={{ cursor: "pointer" }}
       >
-        <div className="tl-ruler-inner" style={{ width: totalPx }}>
+      <div className="tl-ruler-inner" style={{ width: totalPx, height: RULER_H }}>
           {Array.from({ length: secCount + 1 }).map((_, i) => (
             <div key={i} className="tl-tick" style={{ left: i * pps }}>
               <div className="tl-tick-major" />
@@ -162,9 +169,8 @@ export default function Timeline({
     );
   };
 
-  const Track = ({ title, clips, color, track }: { title: string; clips: Clip[]; color: string; track: TrackKind }) => (
-    <div className="tl-track">
-      <div className="tl-title" style={{ marginBottom: "2px" }}>{title}</div>
+  const Track = ({ clips, color, track }: { clips: Clip[]; color: string; track: TrackKind }) => (
+    <div className="tl-track-row">
       <div className="tl-lane" style={{ height: TRACK_H }}>
         <div className="tl-grid" style={{ width: totalPx }}>
           {Array.from({ length: Math.ceil(totalPx / pps) + 1 }).map((_, i) => (
@@ -195,8 +201,7 @@ export default function Timeline({
                 onMouseDown={(e) => {
                   const el = e.target as HTMLElement;
                   if (el.classList.contains("tl-handle")) return;
-                  if (!wrapRef.current) return;
-                  const x = e.clientX - wrapRef.current.getBoundingClientRect().left;
+                  const x = getTimelineX(e.clientX);
                   setDrag({ mode: "move", track, id: c.id, start0: c.start, mouseX0: x });
                 }}
                 onDoubleClick={(e) => {
@@ -210,8 +215,7 @@ export default function Timeline({
                   style={{ width: HANDLE_W }}
                   onMouseDown={(e) => {
                     e.stopPropagation();
-                    if (!wrapRef.current) return;
-                    const x = e.clientX - wrapRef.current.getBoundingClientRect().left;
+                    const x = getTimelineX(e.clientX);
                     setDrag({ mode: "resize-l", track, id: c.id, start0: c.start, duration0: c.duration, mouseX0: x });
                   }}
                 />
@@ -239,8 +243,7 @@ export default function Timeline({
                   style={{ width: HANDLE_W }}
                   onMouseDown={(e) => {
                     e.stopPropagation();
-                    if (!wrapRef.current) return;
-                    const x = e.clientX - wrapRef.current.getBoundingClientRect().left;
+                    const x = getTimelineX(e.clientX);
                     setDrag({ mode: "resize-r", track, id: c.id, start0: c.start, duration0: c.duration, mouseX0: x });
                   }}
                 />
@@ -248,8 +251,6 @@ export default function Timeline({
             );
           })}
         </div>
-
-        <div className="tl-playhead" style={{ left: playheadSec * pps }} />
       </div>
     </div>
   );
@@ -276,10 +277,23 @@ export default function Timeline({
   return (
     <div className="tl-root" ref={wrapRef}>
       <Toolbar />
-      <Ruler />
-      <Track title="Motion" clips={motionClips} color="#7c4dff" track="motion" />
-      <Track title="Expression" clips={exprClips} color="#26a69a" track="expr" />
-      <Track title="Audio" clips={audioClips} color="#ff6b35" track="audio" />
+      <div className="tl-layout">
+        <div className="tl-side">
+          <div className="tl-side-cell tl-side-cell--ruler">Time</div>
+          <div className="tl-side-cell">Motion</div>
+          <div className="tl-side-cell">Expression</div>
+          <div className="tl-side-cell">Audio</div>
+        </div>
+        <div className="tl-timearea" ref={timeAreaRef}>
+          <div className="tl-timecontent">
+            <Ruler />
+            <Track clips={motionClips} color="#7c4dff" track="motion" />
+            <Track clips={exprClips} color="#26a69a" track="expr" />
+            <Track clips={audioClips} color="#ff6b35" track="audio" />
+            <div className="tl-playhead-global" style={{ left: playheadSec * pps }} />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

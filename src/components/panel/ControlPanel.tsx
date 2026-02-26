@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import type { Clip, TrackKind } from "../timeline/types";
 
 interface Motion {
@@ -56,6 +56,7 @@ type Props = {
   addAudioClip: () => void;
   debugModelParameters?: () => void;
   currentAudioLevel?: number;
+  currentFps?: number;
 
   characterOptions: CharacterOption[];
   selectedCharacterId: string;
@@ -119,6 +120,7 @@ const ControlPanel: React.FC<Props> = (props) => {
     stopPlayback,
     clearTimeline,
     currentAudioLevel,
+    currentFps,
   } = props;
 
   const [motionQuery, setMotionQuery] = useState("");
@@ -170,6 +172,65 @@ const ControlPanel: React.FC<Props> = (props) => {
     (exprPageSafe - 1) * exprPageSize,
     exprPageSafe * exprPageSize
   );
+
+  const formatTransformValue = (n: number, digits: number, fallback: string) =>
+    Number.isFinite(n) ? n.toFixed(digits) : fallback;
+
+  const [transformDraft, setTransformDraft] = useState({
+    x: formatTransformValue(characterTransform.x, 1, "0"),
+    y: formatTransformValue(characterTransform.y, 1, "0"),
+    scaleX: formatTransformValue(characterTransform.scaleX, 2, "1"),
+    scaleY: formatTransformValue(characterTransform.scaleY, 2, "1"),
+    rotation: formatTransformValue(characterTransform.rotation, 1, "0"),
+  });
+
+  useEffect(() => {
+    setTransformDraft({
+      x: formatTransformValue(characterTransform.x, 1, "0"),
+      y: formatTransformValue(characterTransform.y, 1, "0"),
+      scaleX: formatTransformValue(characterTransform.scaleX, 2, "1"),
+      scaleY: formatTransformValue(characterTransform.scaleY, 2, "1"),
+      rotation: formatTransformValue(characterTransform.rotation, 1, "0"),
+    });
+  }, [
+    characterTransform.x,
+    characterTransform.y,
+    characterTransform.scaleX,
+    characterTransform.scaleY,
+    characterTransform.rotation,
+    selectedCharacterId,
+  ]);
+
+  const applyTransformDraft = (key: keyof CharacterTransform) => {
+    const raw = transformDraft[key];
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) {
+      setTransformDraft((prev) => ({
+        ...prev,
+        [key]:
+          key === "scaleX" || key === "scaleY"
+            ? formatTransformValue(characterTransform[key], 2, "1")
+            : formatTransformValue(characterTransform[key], 1, "0"),
+      }));
+      return;
+    }
+
+    const normalized = key === "scaleX" || key === "scaleY" ? Math.max(0.01, parsed) : parsed;
+    onUpdateCharacterTransform({ [key]: normalized });
+    setTransformDraft((prev) => ({
+      ...prev,
+      [key]:
+        key === "scaleX" || key === "scaleY"
+          ? normalized.toFixed(2)
+          : normalized.toFixed(1),
+    }));
+  };
+
+  const handleTransformKeyDown = (key: keyof CharacterTransform) => (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== " ") return;
+    e.preventDefault();
+    applyTransformDraft(key);
+  };
 
   return (
     <div className="l2d-panel">
@@ -411,15 +472,19 @@ const ControlPanel: React.FC<Props> = (props) => {
           <input
             className="input"
             type="number"
-            value={Number.isFinite(characterTransform.x) ? characterTransform.x.toFixed(1) : "0"}
-            onChange={(e) => onUpdateCharacterTransform({ x: Number(e.target.value) || 0 })}
+            value={transformDraft.x}
+            onChange={(e) => setTransformDraft((prev) => ({ ...prev, x: e.target.value }))}
+            onBlur={() => applyTransformDraft("x")}
+            onKeyDown={handleTransformKeyDown("x")}
           />
           <span className="muted">Y</span>
           <input
             className="input"
             type="number"
-            value={Number.isFinite(characterTransform.y) ? characterTransform.y.toFixed(1) : "0"}
-            onChange={(e) => onUpdateCharacterTransform({ y: Number(e.target.value) || 0 })}
+            value={transformDraft.y}
+            onChange={(e) => setTransformDraft((prev) => ({ ...prev, y: e.target.value }))}
+            onBlur={() => applyTransformDraft("y")}
+            onKeyDown={handleTransformKeyDown("y")}
           />
         </div>
         <div className="row" style={{ gap: 8, marginTop: 6 }}>
@@ -428,20 +493,20 @@ const ControlPanel: React.FC<Props> = (props) => {
             className="input"
             type="number"
             step={0.01}
-            value={Number.isFinite(characterTransform.scaleX) ? characterTransform.scaleX.toFixed(2) : "1"}
-            onChange={(e) =>
-              onUpdateCharacterTransform({ scaleX: Math.max(0.01, Number(e.target.value) || 0.01) })
-            }
+            value={transformDraft.scaleX}
+            onChange={(e) => setTransformDraft((prev) => ({ ...prev, scaleX: e.target.value }))}
+            onBlur={() => applyTransformDraft("scaleX")}
+            onKeyDown={handleTransformKeyDown("scaleX")}
           />
           <span className="muted">ScaleY</span>
           <input
             className="input"
             type="number"
             step={0.01}
-            value={Number.isFinite(characterTransform.scaleY) ? characterTransform.scaleY.toFixed(2) : "1"}
-            onChange={(e) =>
-              onUpdateCharacterTransform({ scaleY: Math.max(0.01, Number(e.target.value) || 0.01) })
-            }
+            value={transformDraft.scaleY}
+            onChange={(e) => setTransformDraft((prev) => ({ ...prev, scaleY: e.target.value }))}
+            onBlur={() => applyTransformDraft("scaleY")}
+            onKeyDown={handleTransformKeyDown("scaleY")}
           />
         </div>
         <div className="row" style={{ gap: 8, marginTop: 6 }}>
@@ -450,8 +515,10 @@ const ControlPanel: React.FC<Props> = (props) => {
             className="input"
             type="number"
             step={0.1}
-            value={Number.isFinite(characterTransform.rotation) ? characterTransform.rotation.toFixed(1) : "0"}
-            onChange={(e) => onUpdateCharacterTransform({ rotation: Number(e.target.value) || 0 })}
+            value={transformDraft.rotation}
+            onChange={(e) => setTransformDraft((prev) => ({ ...prev, rotation: e.target.value }))}
+            onBlur={() => applyTransformDraft("rotation")}
+            onKeyDown={handleTransformKeyDown("rotation")}
           />
         </div>
       </div>
@@ -473,6 +540,8 @@ const ControlPanel: React.FC<Props> = (props) => {
         Total: {timelineLength.toFixed(2)}s
         <br />
         Playhead: {playhead.toFixed(2)}s
+        <br />
+        FPS: {typeof currentFps === "number" ? currentFps.toFixed(1) : "--"}
         <br />
         <div className="row" style={{ marginTop: 6, gap: 6 }}>
           <button className="btn btn--primary" onClick={startPlayback} disabled={isPlaying || timelineLength <= 0}>
