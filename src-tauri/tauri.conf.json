@@ -4,7 +4,7 @@
   "version": "1.1.1",
   "identifier": "com.DongshanRandeng.l2dmm",
   "build": {
-    "beforeDevCommand": "pnpm run dev -- --port 1431 --strictPort",
+    "beforeDevCommand": "pnpm run dev",
     "devUrl": "http://localhost:1431",
     "beforeBuildCommand": "pnpm run build",
     "frontendDist": "../dist"
