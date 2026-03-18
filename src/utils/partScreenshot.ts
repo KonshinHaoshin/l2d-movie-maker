@@ -1,5 +1,20 @@
 import JSZip from 'jszip';
+import { save } from '@tauri-apps/plugin-dialog';
+import { writeFile } from '@tauri-apps/plugin-fs';
 import type { Live2DModel } from 'pixi-live2d-display';
+
+type PartInfo = { id: string; defaultOpacity: number };
+type SaveTarget =
+  | { kind: 'picker'; handle: FileSystemFileHandle }
+  | { kind: 'tauri'; path: string };
+type InternalModelLike = {
+  coreModel?: {
+    setPartsOpacity?: (id: string, value: number) => void;
+  };
+  settings?: {
+    url?: string;
+  };
+};
 
 /**
  * 从canvas截图
@@ -28,69 +43,204 @@ function waitForRender(delay: number = 150): Promise<void> {
 }
 
 /**
- * 获取模型的内部模型实例
+ * 获取模型的内部模型实�?
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function getInternalModel(model: Live2DModel): any {
+function getInternalModel(model: Live2DModel): unknown | null {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const internalModel = (model as any).internalModel;
-    if (!internalModel) {
-      throw new Error('无法访问内部模型');
-    }
-    return internalModel;
-  } catch (error) {
-    console.error('获取内部模型失败:', error);
-    throw error;
+    return (model as Live2DModel & { internalModel?: unknown }).internalModel ?? null;
+  } catch {
+    return null;
   }
 }
 
+function asInternalModelLike(value: unknown): InternalModelLike | null {
+  return value && typeof value === 'object' ? value as InternalModelLike : null;
+}
+
+function toStringArray(value: unknown): string[] {
+  if (!value || typeof value !== 'object') return [];
+
+  const indexed = value as { length?: unknown; [index: number]: unknown };
+  if (typeof indexed.length !== 'number') return [];
+
+  const result: string[] = [];
+  for (let i = 0; i < indexed.length; i++) {
+    const item = indexed[i];
+    if (typeof item === 'string' && item) {
+      result.push(item);
+    }
+  }
+  return result;
+}
+
+let hasLoggedPartDiscoveryDiagnostics = false;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getRuntimePartIds(coreModel: any): string[] {
+  const candidates: unknown[] = [
+    coreModel?._partIds,
+    coreModel?._model?.parts?.ids,
+    coreModel?.getModel?.()?.parts?.ids,
+    coreModel?.model?.parts?.ids,
+  ];
+
+  for (const candidate of candidates) {
+    const ids = toStringArray(candidate);
+    if (ids.length > 0) {
+      return ids;
+    }
+  }
+
+  return [];
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getRuntimeParameterIds(internalModel: any, coreModel: any): string[] {
+  const candidates: unknown[] = [
+    internalModel?.parameters?.ids,
+    internalModel?.parameters?._parameterIds,
+    coreModel?._parameterIds,
+    coreModel?._model?.parameters?.ids,
+    coreModel?.getModel?.()?.parameters?.ids,
+    coreModel?.model?.parameters?.ids,
+  ];
+
+  for (const candidate of candidates) {
+    const ids = toStringArray(candidate);
+    if (ids.length > 0) {
+      return ids;
+    }
+  }
+
+  const parameters = internalModel?.parameters;
+  if (parameters && typeof parameters.count === 'number' && typeof parameters.get === 'function') {
+    const ids: string[] = [];
+    for (let i = 0; i < parameters.count; i++) {
+      try {
+        const param = parameters.get(i);
+        const id = typeof param?.id === 'string'
+          ? param.id
+          : typeof param === 'string'
+            ? param
+            : null;
+        if (id) {
+          ids.push(id);
+        }
+      } catch {
+        // 忽略单个参数读取失败
+      }
+    }
+    if (ids.length > 0) {
+      return ids;
+    }
+  }
+
+  return [];
+}
+
+function getVisibleParameterPartIds(parameterIds: string[]): string[] {
+  const visiblePrefix = 'VISIBLE:';
+  const seen = new Set<string>();
+  const partIds: string[] = [];
+
+  for (const parameterId of parameterIds) {
+    if (!parameterId.startsWith(visiblePrefix) || parameterId.length <= visiblePrefix.length) {
+      continue;
+    }
+
+    const partId = parameterId.slice(visiblePrefix.length);
+    if (!seen.has(partId)) {
+      seen.add(partId);
+      partIds.push(partId);
+    }
+  }
+
+  return partIds;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function logPartDiscoveryDiagnostics(modelUrl: string, internalModel: any, coreModel: any, parameterIds: string[]) {
+  if (hasLoggedPartDiscoveryDiagnostics) {
+    return;
+  }
+
+  hasLoggedPartDiscoveryDiagnostics = true;
+
+  let modelContextKeys: string[] = [];
+  try {
+    const modelContext = coreModel?.getModelContext?.();
+    if (modelContext && typeof modelContext === 'object') {
+      modelContextKeys = Object.keys(modelContext);
+    }
+  } catch {
+    // 忽略诊断读取失败
+  }
+
+  console.warn('[parts-screenshot] Cubism2 parts 发现失败诊断', {
+    modelUrl: modelUrl || '(unknown model url)',
+    internalModelKeys: internalModel && typeof internalModel === 'object' ? Object.keys(internalModel) : [],
+    coreModelKeys: coreModel && typeof coreModel === 'object' ? Object.keys(coreModel) : [],
+    modelContextKeys,
+    hasParametersObject: Boolean(internalModel?.parameters),
+    parameterCount: typeof internalModel?.parameters?.count === 'number' ? internalModel.parameters.count : null,
+    parameterIdSample: parameterIds.slice(0, 20),
+  });
+}
+
 /**
- * 获取 Cubism 2 模型的 Parts（部件）信息
+ * 获取 Cubism 2 模型�?Parts（部件）信息
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function getCubism2Parts(internalModel: any): Array<{ id: string; defaultOpacity: number }> {
+function getCubism2Parts(internalModel: any): PartInfo[] {
   try {
     const settings = internalModel.settings;
     const coreModel = internalModel.coreModel;
-    const parts: Array<{ id: string; defaultOpacity: number }> = [];
-    
-    console.log('🔍 开始获取 Cubism 2 部件...');
-    
-    // 方法1: 从 settings.initOpacities 获取（这是类型定义中的标准属性）
+    const modelUrl: string = settings?.url ?? '';
+    const parts: PartInfo[] = [];
+    const seen = new Set<string>();
+
+    // 方法1: �?settings.initOpacities 获取（这是类型定义中的标准属性）
     let partIds: Array<{ id: string; value: number }> = [];
-    
+
     if (settings.initOpacities && Array.isArray(settings.initOpacities)) {
       partIds = settings.initOpacities;
-      console.log(`  ✅ 从 settings.initOpacities 获取到 ${partIds.length} 个部件`);
     }
-    // 方法2: 从原始 JSON 获取（如果 initOpacities 未解析）
+    // 方法2: 从原�?JSON 获取（如�?initOpacities 未解析）
     else if (settings.json && settings.json.init_opacities && Array.isArray(settings.json.init_opacities)) {
       partIds = settings.json.init_opacities;
-      console.log(`  ✅ 从 settings.json.init_opacities 获取到 ${partIds.length} 个部件`);
     }
-    // 方法3: 尝试访问私有属性 _partIds（如果存在）
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    else if ((coreModel as any)._partIds && Array.isArray((coreModel as any)._partIds)) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const ids = (coreModel as any)._partIds;
-      console.log(`  ✅ 从 coreModel._partIds 获取到 ${ids.length} 个部件ID`);
-      // 为每个 ID 创建条目，默认不透明度从模型读取
+    // 方法3: 从运行时内部 parts.ids / _partIds 获取
+    else {
+      const ids = getRuntimePartIds(coreModel);
+      // 为每�?ID 创建条目，默认不透明度从模型读取
       for (const id of ids) {
         try {
           const opacity = coreModel.getPartsOpacity(id);
           partIds.push({ id, value: opacity });
         } catch {
-          // 如果无法获取不透明度，使用默认值 1
+          // 如果无法获取不透明度，使用默认�?1
+          partIds.push({ id, value: 1.0 });
+        }
+      }
+    }
+
+    // 方法4: 从参数里的 VISIBLE:<partId> 反推部件列表
+    if (partIds.length === 0) {
+      const parameterIds = getRuntimeParameterIds(internalModel, coreModel);
+      const visiblePartIds = getVisibleParameterPartIds(parameterIds);
+
+      for (const id of visiblePartIds) {
+        try {
+          const opacity = coreModel.getPartsOpacity(id);
+          partIds.push({ id, value: opacity });
+        } catch {
           partIds.push({ id, value: 1.0 });
         }
       }
     }
     
     if (partIds.length === 0) {
-      console.warn('  ⚠️ 未找到部件定义，尝试从 pose 获取...');
-      
-      // 方法4: 从 pose 获取部件ID
+      // 方法5: �?pose 获取部件ID
       if (internalModel.pose && internalModel.pose.partsGroups) {
         const posePartIds = new Set<string>();
         for (const group of internalModel.pose.partsGroups) {
@@ -98,7 +248,7 @@ function getCubism2Parts(internalModel: any): Array<{ id: string; defaultOpacity
             for (const part of group) {
               if (part && part.id) {
                 posePartIds.add(part.id);
-                // 包括链接的部件
+                // 包括链接的部�?
                 if (part.link && Array.isArray(part.link)) {
                   for (const linkedPart of part.link) {
                     if (linkedPart && linkedPart.id) {
@@ -110,9 +260,6 @@ function getCubism2Parts(internalModel: any): Array<{ id: string; defaultOpacity
             }
           }
         }
-        
-        console.log(`  ✅ 从 pose 获取到 ${posePartIds.size} 个部件ID`);
-        
         for (const id of posePartIds) {
           try {
             const opacity = coreModel.getPartsOpacity(id);
@@ -125,83 +272,70 @@ function getCubism2Parts(internalModel: any): Array<{ id: string; defaultOpacity
     }
     
     if (partIds.length === 0) {
-      console.error('  ❌ 无法从任何来源获取部件信息');
-      console.log('  调试信息:');
-      console.log('    settings.initOpacities:', settings.initOpacities);
-      console.log('    settings.json:', settings.json ? Object.keys(settings.json) : 'undefined');
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      console.log('    coreModel._partIds:', (coreModel as any)._partIds);
-      console.log('    pose:', internalModel.pose ? 'exists' : 'undefined');
+      logPartDiscoveryDiagnostics(modelUrl, internalModel, coreModel, getRuntimeParameterIds(internalModel, coreModel));
       return [];
     }
-    
-    // 验证每个部件是否存在
+
+    // Cubism2 里 raw part id 通常可直接用于 get/setPartsOpacity，
+    // 但 getPartsDataIndex(rawId) 不一定返回有效索引，所以这里以 raw id 可读为准。
     for (const item of partIds) {
       const id = item.id;
       const defaultOpacity = item.value;
-      
+      if (!id || seen.has(id)) continue;
+
       try {
-        // 使用 getPartsDataIndex 验证部件存在
-        const index = coreModel.getPartsDataIndex(id);
-        if (index >= 0) {
-          parts.push({ id, defaultOpacity });
-        } else {
-          console.warn(`  ⚠️ 部件 ${id} 索引无效，跳过`);
-        }
+        coreModel.getPartsOpacity(id);
+        parts.push({ id, defaultOpacity });
+        seen.add(id);
       } catch {
-        // 如果 getPartsDataIndex 失败，尝试直接使用
+        // 某些 Cubism2 运行时只接受 PartsDataID 处理后的 id 做索引查询。
         try {
-          coreModel.getPartsOpacity(id);
-          parts.push({ id, defaultOpacity });
+          const partsDataId = (globalThis as { PartsDataID?: { getID?: (value: string) => string } })
+            .PartsDataID?.getID?.(id);
+          if (partsDataId != null && coreModel.getPartsDataIndex(partsDataId) >= 0) {
+            parts.push({ id, defaultOpacity });
+            seen.add(id);
+          }
         } catch {
-          console.warn(`  ⚠️ 部件 ${id} 不存在，跳过`);
+          // 忽略不存在的部件
         }
       }
     }
-    
-    console.log(`✅ Cubism 2 模型找到 ${parts.length} 个有效部件`);
+
     return parts;
-  } catch (error) {
-    console.error('❌ 获取 Cubism 2 部件失败:', error);
+  } catch {
     return [];
   }
 }
 
 /**
- * 获取模型的所有 Parts（部件）信息
+ * 获取模型的所�?Parts（部件）信息
  */
-function getModelParts(model: Live2DModel): Array<{ id: string; defaultOpacity: number }> {
-  try {
-    const internalModel = getInternalModel(model);
-    console.log(`📌 使用 Cubism 2 API 获取部件`);
-    return getCubism2Parts(internalModel);
-  } catch (error) {
-    console.error('❌ 获取模型部件失败:', error);
-    return [];
-  }
+function getModelParts(model: Live2DModel): PartInfo[] {
+  const internalModel = getInternalModel(model);
+  if (!internalModel) return [];
+  return getCubism2Parts(internalModel);
 }
 
 /**
- * 设置 Cubism 2 模型部件的不透明度
+ * 设置 Cubism 2 模型部件的不透明�?
  */
 function setPartOpacity(model: Live2DModel, partId: string, opacity: number) {
   try {
-    const internalModel = getInternalModel(model);
-    const coreModel = internalModel.coreModel;
-    
-    // Cubism 2: 使用 setPartsOpacity(id, value)
-    coreModel.setPartsOpacity(partId, opacity);
-  } catch (error) {
-    console.error(`❌ 设置部件 ${partId} 不透明度失败:`, error);
+    const internalModel = asInternalModelLike(getInternalModel(model));
+    if (!internalModel) return;
+    internalModel.coreModel?.setPartsOpacity?.(partId, opacity);
+  } catch {
+    // 静默跳过
   }
 }
 
 /**
- * 重置所有部件到初始不透明度
+ * 重置所有部件到初始不透明�?
  */
 function resetAllParts(
   model: Live2DModel,
-  parts: Array<{ id: string; defaultOpacity: number }>
+  parts: PartInfo[]
 ) {
   parts.forEach(part => {
     setPartOpacity(model, part.id, part.defaultOpacity);
@@ -223,7 +357,6 @@ export async function exportSingleModelParts(
     throw new Error('无法获取模型部件信息');
   }
 
-  console.log(`📸 开始导出 ${parts.length} 个部件截图...`);
 
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i];
@@ -246,29 +379,135 @@ export async function exportSingleModelParts(
       const safeName = part.id.replace(/[^a-zA-Z0-9_-]/g, '_');
       zip.file(`${i.toString().padStart(3, '0')}_${safeName}.png`, arrayBuffer);
       
-      console.log(`✅ 部件 ${i + 1}/${parts.length}: ${part.id}`);
     } catch (error) {
-      console.error(`❌ 部件 ${part.id} 截图失败:`, error);
+      console.error(`�?部件 ${part.id} 截图失败:`, error);
     }
   }
 
-  // 恢复所有部件到初始状态
+  // 恢复所有部件到初始状�?
   resetAllParts(model, parts);
   await waitForRender(200);
 
-  console.log('🗜️ 正在生成压缩包...');
   const zipBlob = await zip.generateAsync({ 
     type: 'blob',
     compression: 'DEFLATE',
     compressionOptions: { level: 6 }
   });
-  console.log('✅ 压缩包生成完成！');
   
   return zipBlob;
 }
 
 /**
- * JSONL复合模型：导出每个子模型的部件组合截图
+ * 从 model.json URL 读取 init_opacities 预设（字段名 "init_opacities"）
+ * 如果没有该字段则返回 null
+ */
+async function fetchCustomParts(modelUrl: string): Promise<string[] | null> {
+  try {
+    const res = await fetch(modelUrl, { cache: 'no-cache' });
+    if (!res.ok) return null;
+    const json = await res.json();
+    if (Array.isArray(json.init_opacities) && json.init_opacities.length > 0) {
+      return json.init_opacities
+        .map((item: { id?: unknown }) => typeof item?.id === 'string' ? item.id : null)
+        .filter((id: string | null): id is string => Boolean(id));
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function extractPartIdsFromMocBuffer(buffer: ArrayBuffer): string[] {
+  const bytes = new Uint8Array(buffer);
+  const chars = new Array<string>(bytes.length);
+
+  for (let i = 0; i < bytes.length; i++) {
+    const byte = bytes[i];
+    chars[i] = byte >= 32 && byte <= 126 ? String.fromCharCode(byte) : ' ';
+  }
+
+  const asciiText = chars.join('');
+  const matches = asciiText.match(/PARTS_[A-Z0-9_]+/g) ?? [];
+  const seen = new Set<string>();
+  const partIds: string[] = [];
+
+  for (const match of matches) {
+    if (!seen.has(match)) {
+      seen.add(match);
+      partIds.push(match);
+    }
+  }
+
+  return partIds;
+}
+
+async function fetchMocParts(modelUrl: string): Promise<string[] | null> {
+  try {
+    const modelRes = await fetch(modelUrl, { cache: 'no-cache' });
+    if (!modelRes.ok) return null;
+
+    const modelJson = await modelRes.json() as { model?: unknown };
+    if (typeof modelJson.model !== 'string' || !modelJson.model) {
+      return null;
+    }
+
+    const mocUrl = new URL(modelJson.model, modelUrl).href;
+    const mocRes = await fetch(mocUrl, { cache: 'no-cache' });
+    if (!mocRes.ok) return null;
+
+    const buffer = await mocRes.arrayBuffer();
+    const partIds = extractPartIdsFromMocBuffer(buffer);
+    return partIds.length > 0 ? partIds : null;
+  } catch {
+    return null;
+  }
+}
+
+async function pickZipSaveTarget(defaultName: string): Promise<SaveTarget | null> {
+  if ('showSaveFilePicker' in window && typeof window.showSaveFilePicker === 'function') {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: defaultName,
+        types: [{
+          description: 'ZIP',
+          accept: { 'application/zip': ['.zip'] },
+        }],
+      });
+      return { kind: 'picker', handle };
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  const out = await save({
+    defaultPath: defaultName,
+    filters: [{ name: 'ZIP', extensions: ['zip'] }],
+  });
+  if (!out) {
+    return null;
+  }
+
+  return { kind: 'tauri', path: out };
+}
+
+async function writeZipToTarget(blob: Blob, target: SaveTarget): Promise<void> {
+  if (target.kind === 'picker') {
+    const writable = await target.handle.createWritable();
+    await writable.write(blob);
+    await writable.close();
+    return;
+  }
+
+  await writeFile(target.path, new Uint8Array(await blob.arrayBuffer()));
+}
+
+/**
+ * JSONL复合模型：所有子模型同时显示，对所有子模型的 parts 并集逐一截图。
+ * 每张截图中，所有子模型同步将目标 part 设为 1、其余 parts 设为 0。
+ * 若子模型的 model.json 有 init_opacities 字段，以该列表为准。
  */
 export async function exportJsonlModelParts(
   models: Live2DModel[],
@@ -276,78 +515,109 @@ export async function exportJsonlModelParts(
   onProgress?: (current: number, total: number, name: string) => void
 ): Promise<Blob> {
   const zip = new JSZip();
-  let currentScreenshot = 0;
 
-  for (let modelIndex = 0; modelIndex < models.length; modelIndex++) {
-    const model = models[modelIndex];
-    const parts = getModelParts(model);
-    
-    if (parts.length === 0) {
-      console.warn(`⚠️ 模型 ${modelIndex} 无部件信息，跳过`);
-      continue;
-    }
+  // 1. 读取每个子模型的 parts 列表（优先用 model.json 自定义，否则运行时读取）
+  const perModelData: Array<{
+    model: Live2DModel;
+    modelUrl: string;
+    parts: PartInfo[];
+    partIds: Set<string>;
+  }> = [];
 
-    // 筛选出默认不为0的部件（默认可见的）
-    const visibleParts = parts.filter(p => p.defaultOpacity > 0);
-    
-    if (visibleParts.length === 0) {
-      console.warn(`⚠️ 模型 ${modelIndex} 无默认可见部件，跳过`);
-      continue;
-    }
+  for (const model of models) {
+    const internalModel = asInternalModelLike(getInternalModel(model));
+    const modelUrl: string = internalModel?.settings?.url
+      ?? (model as unknown as { _url?: string })._url
+      ?? '';
 
-    console.log(`📸 模型 ${modelIndex}: 发现 ${visibleParts.length} 个默认可见部件`);
-
-    const folderName = `model_${modelIndex.toString().padStart(2, '0')}`;
-    
-    for (let i = 0; i < visibleParts.length; i++) {
-      const targetPart = visibleParts[i];
-      currentScreenshot++;
-      
-      if (onProgress) {
-        onProgress(currentScreenshot, visibleParts.length * models.length, 
-                   `模型${modelIndex}/${targetPart.id}`);
+    let partIds: string[] | null = null;
+    if (modelUrl) {
+      partIds = await fetchCustomParts(modelUrl);
+      if (!partIds || partIds.length === 0) {
+        partIds = await fetchMocParts(modelUrl);
       }
+    }
 
-      // 设置所有部件：当前部件为1，其他默认可见的为0，默认不可见的保持0
-      parts.forEach(p => {
-        if (p.id === targetPart.id) {
-          setPartOpacity(model, p.id, 1);
-        } else if (visibleParts.some(vp => vp.id === p.id)) {
-          setPartOpacity(model, p.id, 0);
-        } else {
-          setPartOpacity(model, p.id, 0);
-        }
+    const runtimeParts = getModelParts(model);
+
+    let resolvedParts: PartInfo[];
+    if (partIds && partIds.length > 0) {
+      // 用自定义列表，defaultOpacity 从运行时读取（找不到则默认 1）
+      resolvedParts = partIds.map(id => {
+        const found = runtimeParts.find(p => p.id === id);
+        return { id, defaultOpacity: found?.defaultOpacity ?? 1 };
       });
-
-      await waitForRender(200);
-
-      try {
-        const blob = await captureCanvas(canvas);
-        const arrayBuffer = await blob.arrayBuffer();
-        
-        const safeName = targetPart.id.replace(/[^a-zA-Z0-9_-]/g, '_');
-        zip.file(`${folderName}/${i.toString().padStart(3, '0')}_${safeName}.png`, arrayBuffer);
-        
-        console.log(`✅ 模型${modelIndex} 部件 ${i + 1}/${visibleParts.length}: ${targetPart.id}`);
-      } catch (error) {
-        console.error(`❌ 模型${modelIndex} 部件 ${targetPart.id} 截图失败:`, error);
-      }
+    } else {
+      resolvedParts = runtimeParts;
     }
 
-    resetAllParts(model, parts);
+    if (resolvedParts.length === 0) {
+      console.warn(`[parts-screenshot] 跳过未定义部件的子模型: ${modelUrl || '(unknown model url)'}`);
+      continue;
+    }
+
+    perModelData.push({
+      model,
+      modelUrl,
+      parts: resolvedParts,
+      partIds: new Set(resolvedParts.map(p => p.id)),
+    });
   }
 
+  // 2. 取所有子模型 partIds 的并集
+  const allPartIds: string[] = [];
+  const seen = new Set<string>();
+  for (const { partIds } of perModelData) {
+    for (const id of partIds) {
+      if (!seen.has(id)) {
+        seen.add(id);
+        allPartIds.push(id);
+      }
+    }
+  }
+
+  if (allPartIds.length === 0) {
+    throw new Error('无法获取任何子模型的部件信息');
+  }
+
+  // 3. 逐 part 截图：所有子模型同步操作
+  for (let i = 0; i < allPartIds.length; i++) {
+    const targetId = allPartIds[i];
+
+    if (onProgress) {
+      onProgress(i + 1, allPartIds.length, targetId);
+    }
+
+    // 对每个子模型：目标 part → 1，其余 parts → 0
+    for (const { model, parts } of perModelData) {
+      for (const p of parts) {
+        setPartOpacity(model, p.id, p.id === targetId ? 1 : 0);
+      }
+    }
+
+    await waitForRender(200);
+
+    try {
+      const blob = await captureCanvas(canvas);
+      const arrayBuffer = await blob.arrayBuffer();
+      const safeName = targetId.replace(/[^a-zA-Z0-9_-]/g, '_');
+      zip.file(`${i.toString().padStart(3, '0')}_${safeName}.png`, arrayBuffer);
+    } catch (error) {
+      console.error(`部件 ${targetId} 截图失败:`, error);
+    }
+  }
+
+  // 4. 恢复所有子模型的原始透明度
+  for (const { model, parts } of perModelData) {
+    resetAllParts(model, parts);
+  }
   await waitForRender(200);
 
-  console.log('🗜️ 正在生成压缩包...');
-  const zipBlob = await zip.generateAsync({ 
+  return await zip.generateAsync({
     type: 'blob',
     compression: 'DEFLATE',
-    compressionOptions: { level: 6 }
+    compressionOptions: { level: 6 },
   });
-  console.log('✅ 压缩包生成完成！');
-  
-  return zipBlob;
 }
 
 /**
@@ -362,24 +632,18 @@ export async function exportModelParts(
     throw new Error('模型或Canvas未初始化');
   }
 
+  const saveTarget = await pickZipSaveTarget(`live2d_parts_${Date.now()}.zip`);
+  if (!saveTarget) {
+    return;
+  }
+
   let zipBlob: Blob;
 
   if (Array.isArray(modelRef)) {
-    console.log('🎭 检测到JSONL复合模型，开始导出...');
     zipBlob = await exportJsonlModelParts(modelRef, canvas, onProgress);
   } else {
-    console.log('🎨 检测到普通Live2D模型，开始导出...');
     zipBlob = await exportSingleModelParts(modelRef, canvas, onProgress);
   }
 
-  const url = URL.createObjectURL(zipBlob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `live2d_parts_${Date.now()}.zip`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-
-  console.log('🎉 导出完成！');
+  await writeZipToTarget(zipBlob, saveTarget);
 }

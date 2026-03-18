@@ -9,6 +9,8 @@ export default defineConfig({
   server: {
     port: 1431,
     strictPort: true,
+    host: 'localhost',
+    hmr: { protocol: 'ws', host: 'localhost', port: 1431 },
   },
   envPrefix: ['VITE_', 'TAURI_'],
   build: {

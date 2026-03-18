@@ -30,6 +30,7 @@ pub fn run() {
             crate::commands::media::vp9_to_prores4444,
             crate::commands::media::mov_to_webm_alpha,
             crate::commands::media::alpha_to_mp4_flatten,
+            crate::commands::media::encode_png_sequence_to_webm_alpha,
             crate::commands::models::find_live2d_models,
             crate::commands::server::get_model_server_info,
             crate::commands::server::refresh_model_index,
