@@ -1,11 +1,14 @@
 export type Clip = {
     id: string;
-    name: string;     // 动作组名 或 表情名 或 音频文件名
-    start: number;    // 秒
-    duration: number; // 秒
-    // 音频特有属性
+    name: string;     // 动作组名 �?表情�?�?音频文件�?
+    start: number;    // �?
+    duration: number; // �?
+    // 音频特有属�?
     audioUrl?: string; // 音频文件URL
-    audioBuffer?: AudioBuffer; // 音频缓冲区
+    audioPath?: string; // 音频文件实路�? (���ߵ���ʹ��)
+    audioBuffer?: AudioBuffer; // 音频缓冲�?
 };
 
 export type TrackKind = "motion" | "expr" | "audio";
+
+
