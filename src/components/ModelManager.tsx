@@ -8,6 +8,17 @@ interface ModelData {
   expressions: Expression[];
 }
 
+export interface JsonlRoleMeta {
+  id: string;
+  folder?: string;
+  path: string;
+  index: number;
+}
+
+export type JsonlLive2DModel = Live2DModel & {
+  __jsonlRoleMeta?: JsonlRoleMeta;
+};
+
 interface ModelManagerProps {
   appRef: React.MutableRefObject<PIXI.Application | null>;
   modelRef: React.MutableRefObject<Live2DModel | Live2DModel[] | null>;
@@ -236,6 +247,8 @@ export default function ModelManager({
   type JsonlPart = {
     path: string;
     id?: string;
+    folder?: string;
+    index: number;
     x?: number;
     y?: number;
     xscale?: number;
@@ -288,6 +301,8 @@ export default function ModelManager({
             parts.push({
               path: fullPath,
               id: obj.id,
+              folder: obj.folder,
+              index: typeof obj.index === "number" ? obj.index : parts.length,
               x: obj.x,
               y: obj.y,
               xscale: obj.xscale,
@@ -322,10 +337,16 @@ export default function ModelManager({
       for (const p of parts) {
         try {
           console.log('📦 加载子模型:', p.path);
-          const m = await Live2DModel.from(p.path, { autoInteract: false });
+          const m = await Live2DModel.from(p.path, { autoInteract: false }) as JsonlLive2DModel;
           console.log('✅ 子模型加载成功:', p.path);
           m.visible = false;
           m.anchor.set(0.5);
+          m.__jsonlRoleMeta = {
+            id: p.id || p.folder || `part${p.index}`,
+            folder: p.folder,
+            path: p.path,
+            index: p.index,
+          };
 
           // 基准缩放（尽量完整显示）
           const baseScaleX = app.screen.width / m.width;

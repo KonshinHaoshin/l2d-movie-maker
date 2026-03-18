@@ -12,6 +12,7 @@ import ExportToolbar from "./ExportToolbar";
 import ModelManager from "./ModelManager";
 import AudioManager from "./AudioManager";
 import RecordingManager from "./RecordingManager";
+import type { JsonlLive2DModel } from "./ModelManager";
 
 // import { convertFileSrc } from "@tauri-apps/api/core";
 // import { normalizePath } from "../utils/fs";
@@ -28,6 +29,11 @@ interface ModelData {
   motions: { [key: string]: Motion[] };
   expressions: Expression[];
 }
+
+type CharacterOption = {
+  id: string;
+  label: string;
+};
 
 type MotionLenMap = Record<string, number>;
 
@@ -54,6 +60,8 @@ export default function Live2DView() {
   const [modelData, setModelData] = useState<ModelData | null>(null);
   const [currentMotion, setCurrentMotion] = useState<string>("");
   const [currentExpression, setCurrentExpression] = useState<string>("default");
+  const [characterOptions, setCharacterOptions] = useState<CharacterOption[]>([]);
+  const [selectedCharacterId, setSelectedCharacterId] = useState<string>("main");
   const [showControls, setShowControls] = useState<boolean>(true);
   const [enableDragging, setEnableDragging] = useState<boolean>(true);
   const [isDragging, setIsDragging] = useState<boolean>(false);
@@ -368,6 +376,40 @@ export default function Live2DView() {
     }
   };
 
+  const refreshCharacterOptions = () => {
+    const current = modelRef.current;
+    if (!current) {
+      setCharacterOptions([]);
+      setSelectedCharacterId("main");
+      return;
+    }
+
+    if (Array.isArray(current)) {
+      const uniqueOptions = new Map<string, CharacterOption>();
+
+      current.forEach((model, index) => {
+        const meta = (model as JsonlLive2DModel).__jsonlRoleMeta;
+        const rawId = meta?.id || `part${index}`;
+        const roleId = rawId.replace(/\d+$/, "") || rawId;
+
+        if (!uniqueOptions.has(roleId)) {
+          uniqueOptions.set(roleId, {
+            id: roleId,
+            label: roleId,
+          });
+        }
+      });
+      const options = Array.from(uniqueOptions.values());
+
+      setCharacterOptions(options);
+      setSelectedCharacterId((prev) => options.some(option => option.id === prev) ? prev : (options[0]?.id ?? "main"));
+      return;
+    }
+
+    setCharacterOptions([{ id: "main", label: "main" }]);
+    setSelectedCharacterId("main");
+  };
+
   useEffect(() => {
     (async () => {
       try {
@@ -446,6 +488,7 @@ export default function Live2DView() {
       // 如果已有选择，载入模型
       if (modelUrl) {
         await modelManager.loadAnyModel(app, modelUrl);
+        refreshCharacterOptions();
         if (disposed) return;
       }
 
@@ -526,7 +569,11 @@ export default function Live2DView() {
   useEffect(() => {
     (async () => {
       if (!appRef.current) return;
-      if (!modelUrl) return;
+      if (!modelUrl) {
+        setCharacterOptions([]);
+        setSelectedCharacterId("main");
+        return;
+      }
 
       // 停止播放，清时间线
       stopPlayback();
@@ -536,6 +583,7 @@ export default function Live2DView() {
       modelManager.cleanupCurrentModel();
 
       await modelManager.loadAnyModel(appRef.current, modelUrl);
+      refreshCharacterOptions();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modelUrl]);
@@ -619,6 +667,9 @@ export default function Live2DView() {
           addMotionClip={addMotionClip}
           addExprClip={addExprClip}
           addAudioClip={addAudioClip}
+          characterOptions={characterOptions}
+          selectedCharacterId={selectedCharacterId}
+          onSelectCharacter={setSelectedCharacterId}
 
           enableDragging={enableDragging}
           setEnableDragging={setEnableDragging}
