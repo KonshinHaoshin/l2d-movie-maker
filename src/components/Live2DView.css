@@ -521,15 +521,16 @@
     position: absolute;
     pointer-events: auto;
     z-index: 999;
-    border: 2px solid #000000;
-    box-shadow: 0 0 10px rgba(0,0,0,0.5);
+    border: 2px solid #ff3b30;
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.75), 0 0 10px rgba(0,0,0,0.45);
     cursor: move;
+    user-select: none;
 }
 
 /* 调整大小的手柄 */
 .resize-handle {
     position: absolute;
-    background: #000000;
+    background: #ff3b30;
     border: 1px solid #ffffff;
     cursor: nw-resize;
 }
@@ -587,6 +588,12 @@
 .recording-bounds-checkbox {
     width: 16px;
     height: 16px;
+}
+
+/* Failsafe: hide deprecated manual recording-bounds toggle in stale UI paths */
+#showRecordingBounds,
+label[for="showRecordingBounds"] {
+    display: none !important;
 }
 
 .recording-bounds-label {
@@ -737,6 +744,25 @@
     cursor: not-allowed;
 }
 
+.offline-button {
+    background: #0ea5e9;
+    color: #fff;
+    border: none;
+    padding: 8px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.offline-button:hover {
+    background: #0284c7;
+}
+
+.offline-button:disabled {
+    background: #6c757d;
+    cursor: not-allowed;
+}
+
 .stop-button {
     background: #ff6b6b;
     color: #fff;
@@ -844,5 +870,107 @@
 .live2d-canvas {
     background: transparent;
     display: block;
+}
+
+/* ===== Timeline UX refresh (NLE-like) ===== */
+.tl-root {
+    background: rgba(20, 20, 20, 0.98) !important;
+    border-top: 1px solid #3a3a3a !important;
+    padding: 10px 12px 12px !important;
+    user-select: none;
+}
+
+.tl-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px !important;
+}
+
+.tl-layout {
+    display: grid;
+    grid-template-columns: 120px 1fr;
+    gap: 8px;
+    align-items: start;
+}
+
+.tl-side {
+    display: grid;
+    grid-template-rows: 30px 56px 56px 56px;
+    gap: 6px;
+}
+
+.tl-side-cell {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 0 10px;
+    font-size: 12px;
+    color: #cfcfcf;
+    background: #1a1a1a;
+    border: 1px solid #303030;
+    border-radius: 6px;
+}
+
+.tl-side-cell--ruler {
+    font-size: 11px;
+    color: #9f9f9f;
+}
+
+.tl-timearea {
+    overflow-x: auto;
+    overflow-y: hidden;
+    border: 1px solid #303030;
+    border-radius: 6px;
+    background: #151515;
+}
+
+.tl-timecontent {
+    position: relative;
+    width: max-content;
+    min-width: 100%;
+    padding: 0 0 2px 0;
+}
+
+.tl-ruler {
+    height: 30px !important;
+    border: 0 !important;
+    border-bottom: 1px solid #2f2f2f !important;
+    border-radius: 0 !important;
+    margin-bottom: 6px !important;
+    overflow: hidden !important;
+    background: #171717 !important;
+}
+
+.tl-track-row {
+    margin-bottom: 6px;
+}
+
+.tl-lane {
+    height: 56px !important;
+    border-radius: 0 !important;
+    border: 0 !important;
+    border-bottom: 1px solid #2b2b2b !important;
+    overflow: hidden !important;
+    background: #1d1d1d !important;
+}
+
+.tl-clip {
+    border-radius: 4px !important;
+}
+
+.tl-playhead-global {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: #ffd400;
+    z-index: 4;
+    pointer-events: none;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+}
+
+.export-toolbar {
+    bottom: 220px !important;
 }
 
