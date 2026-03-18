@@ -9,6 +9,11 @@ export interface ModelData {
   expressions: Expression[];
 }
 
+type CharacterOption = {
+  id: string;
+  label: string;
+};
+
 type Props = {
   onClose: () => void;
 
@@ -38,6 +43,9 @@ type Props = {
   addMotionClip: (name: string) => void;
   addExprClip: (name: string) => void;
   addAudioClip: () => void; // 新增音频导入功能
+  characterOptions?: CharacterOption[];
+  selectedCharacterId?: string;
+  onSelectCharacter?: (id: string) => void;
   debugModelParameters?: () => void; // 调试模型参数
   currentAudioLevel?: number; // 当前音频电平
 
@@ -73,6 +81,7 @@ const ControlPanel: React.FC<Props> = (props) => {
     currentMotion, currentExpression,
     motionDur, exprDur, setMotionDur, setExprDur,
     chooseMotion, chooseExpression, addMotionClip, addExprClip, addAudioClip,
+    characterOptions = [], selectedCharacterId = "", onSelectCharacter,
     enableDragging, setEnableDragging, isDragging,
     timelineLength, playhead, isPlaying, startPlayback, stopPlayback,
     clearTimeline,
@@ -166,6 +175,26 @@ const ControlPanel: React.FC<Props> = (props) => {
           )}
         </div>
       </div>
+
+      {(characterOptions.length > 1 || (characterOptions.length === 1 && characterOptions[0]?.id !== "main")) && (
+        <div className="l2d-section">
+          <h4 className="l2d-section-title">🎯 Role</h4>
+          <div className="row" style={{ gap: 8 }}>
+            <select
+              className="input"
+              value={selectedCharacterId}
+              onChange={(e) => onSelectCharacter?.(e.target.value)}
+              style={{ width: "100%" }}
+            >
+              {characterOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
 
       {/* 动作 */}
       <div className="l2d-section">
