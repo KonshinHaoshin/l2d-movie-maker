@@ -14,6 +14,37 @@ type TransformSnapshot = {
   scaleY: number;
   rotation: number;
 };
+type DragMode = "move" | "rotate";
+type PointerDataLike = {
+  data: {
+    global: { x: number; y: number };
+    originalEvent?: MouseEvent | PointerEvent;
+  };
+};
+type DraggableState = {
+  dragging?: boolean;
+  _pointerX?: number;
+  _pointerY?: number;
+  _dragMode?: DragMode;
+  _startAngle?: number;
+  _startRotation?: number;
+};
+type InternalEyeBlinkLike = {
+  blinkInterval: number;
+  nextBlinkTimeLeft: number;
+};
+type InternalModelLike = {
+  angleXParamIndex?: number;
+  angleYParamIndex?: number;
+  angleZParamIndex?: number;
+  eyeBlink?: InternalEyeBlinkLike;
+};
+type DraggableDisplayObject = PIXI.Container & DraggableState & {
+  autoInteract?: boolean;
+};
+type DraggableCleanupTarget = PIXI.Container & {
+  __dragCleanup?: () => void;
+};
 
 export interface JsonlRoleMeta {
   id: string;
@@ -80,15 +111,16 @@ export default function ModelManager({
       if (Array.isArray(modelRef.current)) {
         // 移除并销毁复合容�?
         if (groupContainerRef.current) {
-          groupContainerRef.current.removeChildren().forEach((c: any) => {
-            try { c.destroy?.({ children: true, texture: true, baseTexture: true }); } catch {}
+          (groupContainerRef.current as DraggableCleanupTarget).__dragCleanup?.();
+          groupContainerRef.current.removeChildren().forEach((child) => {
+            try { child.destroy?.({ children: true, texture: true, baseTexture: true }); } catch {}
           });
           app.stage.removeChild(groupContainerRef.current);
           try { groupContainerRef.current.destroy?.({ children: true }); } catch {}
         }
       } else if (modelRef.current) {
-        app.stage.removeChild(modelRef.current as any);
-        try { (modelRef.current as any).destroy?.({ children: true, texture: true, baseTexture: true }); } catch {}
+        app.stage.removeChild(modelRef.current);
+        try { modelRef.current.destroy?.({ children: true, texture: true, baseTexture: true }); } catch {}
       }
       
       // 清理引用
@@ -102,19 +134,18 @@ export default function ModelManager({
     }
   };
 
-  const emitTransformChange = (target: any) => {
+  const emitTransformChange = (target: PIXI.Container) => {
     onTransformChange?.({
-      x: Number(target?.position?.x ?? target?.x ?? 0),
-      y: Number(target?.position?.y ?? target?.y ?? 0),
-      scaleX: Number(target?.scale?.x ?? 1),
-      scaleY: Number(target?.scale?.y ?? 1),
-      rotation: Number((target?.rotation ?? 0) * 180 / Math.PI),
+      x: Number(target.position.x),
+      y: Number(target.position.y),
+      scaleX: Number(target.scale.x),
+      scaleY: Number(target.scale.y),
+      rotation: Number(target.rotation * 180 / Math.PI),
     });
   };
 
-  const updateBoundsFromDisplayObject = (target: any) => {
-    const bounds = target?.getBounds?.();
-    if (!bounds) return;
+  const updateBoundsFromDisplayObject = (target: PIXI.Container) => {
+    const bounds = target.getBounds();
     setCustomRecordingBounds({
       x: Math.max(0, bounds.x),
       y: Math.max(0, bounds.y),
@@ -124,45 +155,45 @@ export default function ModelManager({
   };
 
   // 使模�?容器可拖�?
-  const makeDraggableModel = (model: any) => {
+  const makeDraggableModel = (model: DraggableDisplayObject) => {
     model.interactive = true;
     model.buttonMode = true;
 
-    model.on("pointerdown", (e: any) => {
+    model.on("pointerdown", (e: PointerDataLike) => {
       setIsDragging(true);
-      (model as any).dragging = true;
-      (model as any)._pointerX = e.data.global.x - model.x;
-      (model as any)._pointerY = e.data.global.y - model.y;
-      (model as any)._dragMode = "move";
+      model.dragging = true;
+      model._pointerX = e.data.global.x - model.x;
+      model._pointerY = e.data.global.y - model.y;
+      model._dragMode = "move";
       const originalEvent = e.data.originalEvent as MouseEvent | PointerEvent | undefined;
       if (originalEvent?.altKey) {
-        (model as any)._dragMode = "rotate";
-        (model as any)._startAngle = Math.atan2(e.data.global.y - model.y, e.data.global.x - model.x);
-        (model as any)._startRotation = model.rotation ?? 0;
+        model._dragMode = "rotate";
+        model._startAngle = Math.atan2(e.data.global.y - model.y, e.data.global.x - model.x);
+        model._startRotation = model.rotation ?? 0;
       }
     });
 
-    model.on("pointermove", (e: any) => {
-      if ((model as any).dragging) {
+    model.on("pointermove", (e: PointerDataLike) => {
+      if (model.dragging) {
         const originalEvent = e.data.originalEvent as MouseEvent | PointerEvent | undefined;
         const wantsRotate = !!originalEvent?.altKey;
 
         if (wantsRotate) {
-          if ((model as any)._dragMode !== "rotate") {
-            (model as any)._dragMode = "rotate";
-            (model as any)._startAngle = Math.atan2(e.data.global.y - model.y, e.data.global.x - model.x);
-            (model as any)._startRotation = model.rotation ?? 0;
+          if (model._dragMode !== "rotate") {
+            model._dragMode = "rotate";
+            model._startAngle = Math.atan2(e.data.global.y - model.y, e.data.global.x - model.x);
+            model._startRotation = model.rotation ?? 0;
           }
           const currentAngle = Math.atan2(e.data.global.y - model.y, e.data.global.x - model.x);
-          model.rotation = (model as any)._startRotation + (currentAngle - (model as any)._startAngle);
+          model.rotation = (model._startRotation ?? model.rotation) + (currentAngle - (model._startAngle ?? currentAngle));
         } else {
-          if ((model as any)._dragMode !== "move") {
-            (model as any)._dragMode = "move";
-            (model as any)._pointerX = e.data.global.x - model.x;
-            (model as any)._pointerY = e.data.global.y - model.y;
+          if (model._dragMode !== "move") {
+            model._dragMode = "move";
+            model._pointerX = e.data.global.x - model.x;
+            model._pointerY = e.data.global.y - model.y;
           }
-          model.position.x = e.data.global.x - (model as any)._pointerX;
-          model.position.y = e.data.global.y - (model as any)._pointerY;
+          model.position.x = e.data.global.x - (model._pointerX ?? 0);
+          model.position.y = e.data.global.y - (model._pointerY ?? 0);
         }
 
         updateBoundsFromDisplayObject(model);
@@ -172,14 +203,14 @@ export default function ModelManager({
 
     const up = () => {
       setIsDragging(false);
-      (model as any).dragging = false;
-      (model as any)._dragMode = undefined;
+      model.dragging = false;
+      model._dragMode = undefined;
     };
     model.on("pointerup", up);
     model.on("pointerupoutside", up);
   };
 
-  const makeDraggableContainer = (container: PIXI.Container) => {
+  const makeDraggableContainer = (container: DraggableDisplayObject) => {
     // 为容器添加一个几乎透明的命中区域，保证好拖
     const hit = new PIXI.Graphics();
     const redrawHit = () => {
@@ -197,43 +228,43 @@ export default function ModelManager({
     container.eventMode = "static";
     container.cursor = "grab";
 
-    container.on("pointerdown", (e: any) => {
+    container.on("pointerdown", (e: PointerDataLike) => {
       setIsDragging(true);
       // @ts-ignore
       container.cursor = "grabbing";
-      (container as any).dragging = true;
-      (container as any)._pointerX = e.data.global.x - container.x;
-      (container as any)._pointerY = e.data.global.y - container.y;
-      (container as any)._dragMode = "move";
+      container.dragging = true;
+      container._pointerX = e.data.global.x - container.x;
+      container._pointerY = e.data.global.y - container.y;
+      container._dragMode = "move";
       const originalEvent = e.data.originalEvent as MouseEvent | PointerEvent | undefined;
       if (originalEvent?.altKey) {
-        (container as any)._dragMode = "rotate";
-        (container as any)._startAngle = Math.atan2(e.data.global.y - container.y, e.data.global.x - container.x);
-        (container as any)._startRotation = container.rotation ?? 0;
+        container._dragMode = "rotate";
+        container._startAngle = Math.atan2(e.data.global.y - container.y, e.data.global.x - container.x);
+        container._startRotation = container.rotation ?? 0;
       }
     });
 
-    container.on("pointermove", (e: any) => {
-      if ((container as any).dragging) {
+    container.on("pointermove", (e: PointerDataLike) => {
+      if (container.dragging) {
         const originalEvent = e.data.originalEvent as MouseEvent | PointerEvent | undefined;
         const wantsRotate = !!originalEvent?.altKey;
 
         if (wantsRotate) {
-          if ((container as any)._dragMode !== "rotate") {
-            (container as any)._dragMode = "rotate";
-            (container as any)._startAngle = Math.atan2(e.data.global.y - container.y, e.data.global.x - container.x);
-            (container as any)._startRotation = container.rotation ?? 0;
+          if (container._dragMode !== "rotate") {
+            container._dragMode = "rotate";
+            container._startAngle = Math.atan2(e.data.global.y - container.y, e.data.global.x - container.x);
+            container._startRotation = container.rotation ?? 0;
           }
           const currentAngle = Math.atan2(e.data.global.y - container.y, e.data.global.x - container.x);
-          container.rotation = (container as any)._startRotation + (currentAngle - (container as any)._startAngle);
+          container.rotation = (container._startRotation ?? container.rotation) + (currentAngle - (container._startAngle ?? currentAngle));
         } else {
-          if ((container as any)._dragMode !== "move") {
-            (container as any)._dragMode = "move";
-            (container as any)._pointerX = e.data.global.x - container.x;
-            (container as any)._pointerY = e.data.global.y - container.y;
+          if (container._dragMode !== "move") {
+            container._dragMode = "move";
+            container._pointerX = e.data.global.x - container.x;
+            container._pointerY = e.data.global.y - container.y;
           }
-          container.position.x = e.data.global.x - (container as any)._pointerX;
-          container.position.y = e.data.global.y - (container as any)._pointerY;
+          container.position.x = e.data.global.x - (container._pointerX ?? 0);
+          container.position.y = e.data.global.y - (container._pointerY ?? 0);
         }
 
         updateBoundsFromDisplayObject(container);
@@ -246,12 +277,17 @@ export default function ModelManager({
       setIsDragging(false);
       // @ts-ignore
       container.cursor = "grab";
-      (container as any).dragging = false;
-      (container as any)._dragMode = undefined;
+      container.dragging = false;
+      container._dragMode = undefined;
     };
     container.on("pointerup", up);
     container.on("pointerupoutside", up);
     window.addEventListener("resize", redrawHit);
+    (container as DraggableCleanupTarget).__dragCleanup = () => {
+      window.removeEventListener("resize", redrawHit);
+      container.off("pointerup", up);
+      container.off("pointerupoutside", up);
+    };
   };
 
   // 单模型加�?
@@ -279,10 +315,10 @@ export default function ModelManager({
       model.scale.set(0.3);
       model.position.set(app.screen.width / 2, app.screen.height / 2);
 
-      (model as any).autoInteract = false;
-      const im = (model as any).internalModel as any;
+      model.autoInteract = false;
+      const im = model.internalModel as unknown as InternalModelLike | undefined;
       if (im) {
-        ["angleXParamIndex", "angleYParamIndex", "angleZParamIndex"].forEach((k) => {
+        (["angleXParamIndex", "angleYParamIndex", "angleZParamIndex"] as const).forEach((k) => {
           if (typeof im[k] === "number") im[k] = -1;
         });
         // 关闭眨眼

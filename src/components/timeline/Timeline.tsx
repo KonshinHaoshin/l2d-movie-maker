@@ -6,6 +6,7 @@ type Props = {
   exprClips: Clip[];
   audioClips: Clip[];
   playheadSec: number;
+  playheadSourceRef?: { current: number };
   pixelsPerSec?: number;
   onChangePixelsPerSec?: (pps: number) => void;
   onChangeClip: (track: TrackKind, id: string, patch: Partial<Pick<Clip, "start" | "duration">>) => void;
@@ -41,6 +42,7 @@ export default function Timeline({
   exprClips,
   audioClips,
   playheadSec,
+  playheadSourceRef,
   pixelsPerSec,
   onChangePixelsPerSec,
   onChangeClip,
@@ -75,6 +77,9 @@ export default function Timeline({
   const hasClips = motionClips.length > 0 || exprClips.length > 0 || audioClips.length > 0;
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const timeAreaRef = useRef<HTMLDivElement | null>(null);
+  const playheadLineRef = useRef<HTMLDivElement | null>(null);
+  const playheadValueRef = useRef<HTMLSpanElement | null>(null);
+  const visualPlayheadSecRef = useRef(playheadSec);
   const [drag, setDrag] = useState<DragKind>(null);
 
   const getTimelineX = (clientX: number) => {
@@ -87,14 +92,16 @@ export default function Timeline({
   useEffect(() => {
     const timeArea = timeAreaRef.current;
     if (!timeArea) return;
+    const wheelListenerOptions: AddEventListenerOptions = { passive: false };
+
     const onWheel = (event: WheelEvent) => {
       if (!event.altKey) return;
       event.preventDefault();
       const factor = event.deltaY > 0 ? 0.9 : 1.1;
       setPps(pps * factor);
     };
-    timeArea.addEventListener("wheel", onWheel, { passive: false });
-    return () => timeArea.removeEventListener("wheel", onWheel);
+    timeArea.addEventListener("wheel", onWheel, wheelListenerOptions);
+    return () => timeArea.removeEventListener("wheel", onWheel, wheelListenerOptions);
   }, [pps]);
 
   useEffect(() => {
@@ -142,6 +149,39 @@ export default function Timeline({
 
   const totalPx = Math.max(pps * Math.max(1, lengthSec), 960);
 
+  const syncPlayheadVisual = (sec: number) => {
+    const nextSec = Math.max(0, sec);
+    visualPlayheadSecRef.current = nextSec;
+
+    if (playheadLineRef.current) {
+      playheadLineRef.current.style.transform = `translateX(${nextSec * pps}px)`;
+    }
+
+    if (playheadValueRef.current) {
+      playheadValueRef.current.textContent = formatPrecise(nextSec);
+    }
+  };
+
+  useEffect(() => {
+    syncPlayheadVisual(playheadSec);
+  }, [playheadSec, pps]);
+
+  useEffect(() => {
+    if (!isPlaying) {
+      syncPlayheadVisual(playheadSourceRef?.current ?? playheadSec);
+      return;
+    }
+
+    let rafId = 0;
+    const tickVisual = () => {
+      syncPlayheadVisual(playheadSourceRef?.current ?? playheadSec);
+      rafId = requestAnimationFrame(tickVisual);
+    };
+
+    rafId = requestAnimationFrame(tickVisual);
+    return () => cancelAnimationFrame(rafId);
+  }, [isPlaying, playheadSec, playheadSourceRef, pps]);
+
   const Ruler = () => {
     const secCount = Math.ceil(totalPx / pps);
     const majorEvery = niceMajorStep(pps);
@@ -151,7 +191,7 @@ export default function Timeline({
         title="拖动设置播放头，双击开始播放"
         onMouseDown={(event) => {
           const x = getTimelineX(event.clientX);
-          setDrag({ mode: "playhead", mouseX0: x, playhead0: playheadSec });
+          setDrag({ mode: "playhead", mouseX0: x, playhead0: playheadSourceRef?.current ?? playheadSec });
           onSetPlayhead?.(snap(Math.max(0, x / pps)));
         }}
         onDoubleClick={(event) => {
@@ -296,7 +336,9 @@ export default function Timeline({
             回到开头
           </button>
           <div className="tl-toolbar-meta">
-            <span>播放头 {formatPrecise(playheadSec)}</span>
+            <span>
+              播放头 <span ref={playheadValueRef}>{formatPrecise(playheadSec)}</span>
+            </span>
             <span>总长 {formatPrecise(lengthSec)}</span>
           </div>
           <div className="tl-zoom-group">
@@ -350,7 +392,7 @@ export default function Timeline({
                 <Track clips={motionClips} track="motion" />
                 <Track clips={exprClips} track="expr" />
                 <Track clips={audioClips} track="audio" />
-                <div className="tl-playhead-global" style={{ left: playheadSec * pps }} />
+                <div ref={playheadLineRef} className="tl-playhead-global" style={{ left: 0, transform: `translateX(${playheadSec * pps}px)` }} />
               </>
             ) : (
               <div className="tl-empty">
