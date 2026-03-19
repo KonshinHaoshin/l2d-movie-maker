@@ -6,8 +6,7 @@ import Timeline from "./timeline/Timeline";
 import type { Clip, TrackKind } from "./timeline/types";
 import { parseMtn } from "../utils/parseMtn";
 import "./Live2DView.css";
-import ControlPanel from "./panel/ControlPanel";
-import ExportToolbar from "./ExportToolbar";
+import ControlPanel, { type InspectorTab } from "./panel/ControlPanel";
 import ModelManager from "./ModelManager";
 import type { JsonlLive2DModel } from "./ModelManager";
 import AudioManager from "./AudioManager";
@@ -33,6 +32,7 @@ interface ModelData {
 type MotionLenMap = Record<string, number>;
 type CharacterOption = { id: string; label: string };
 type CharacterTransform = { x: number; y: number; scaleX: number; scaleY: number; rotation: number };
+type ToolbarAction = "play" | "stop" | "record" | "record-stop";
 
 
 export default function Live2DView() {
@@ -59,7 +59,6 @@ export default function Live2DView() {
   const [modelData, setModelData] = useState<ModelData | null>(null);
   const [currentMotion, setCurrentMotion] = useState<string>("");
   const [currentExpression, setCurrentExpression] = useState<string>("default");
-  const [showControls, setShowControls] = useState<boolean>(true);
   const [enableDragging, setEnableDragging] = useState<boolean>(true);
   const [isDragging, setIsDragging] = useState<boolean>(false);
 
@@ -107,6 +106,9 @@ export default function Live2DView() {
   
   // ???WebGAL?? ???//
   const [showWebGALMode, setShowWebGALMode] = useState(false);
+  const [activeInspectorTab, setActiveInspectorTab] = useState<InspectorTab>("character");
+  const [isResourcePaneCollapsed, setIsResourcePaneCollapsed] = useState(false);
+  const [isInspectorPaneCollapsed, setIsInspectorPaneCollapsed] = useState(false);
 
   // ??????
   const modelManager = ModelManager({
@@ -187,7 +189,7 @@ export default function Live2DView() {
       return;
     }
 
-    setCharacterOptions([{ id: "main", label: "Main Model" }]);
+    setCharacterOptions([{ id: "main", label: "主角色" }]);
     if (selectedCharacterId !== "main") setSelectedCharacterId("main");
     setCharacterTransform({
       x: Number((cur as any).position?.x ?? 0),
@@ -1021,130 +1023,258 @@ export default function Live2DView() {
     return () => { aborted = true; };
   }, [modelData, modelUrl]);
 
-  return (
-    <div className="live2d-container">
-      <div ref={containerRef} data-transparent="true" />
+  const selectedModelParts = selectedModel ? selectedModel.split("/") : [];
+  const selectedModelDisplayName = selectedModel
+    ? (selectedModelParts[selectedModelParts.length - 2] ?? selectedModel)
+    : "未加载模型";
+  const selectedCharacterLabel =
+    characterOptions.find((option) => option.id === selectedCharacterId)?.label ??
+    characterOptions[0]?.label ??
+    "主角色";
 
-      {/* WebGAL?? */}
-               {showWebGALMode && (
+  const toolbarAction: ToolbarAction = isPlaying
+    ? "stop"
+    : recState === "rec"
+      ? "record-stop"
+      : blob
+        ? "play"
+        : "record";
+
+  const panelProps = {
+    onToggleWebGALMode: () => setShowWebGALMode(true),
+    modelList,
+    selectedModel,
+    onSelectModel: (rel: string | null) => setSelectedModel(rel || null),
+    onRefreshModels: refreshModels,
+    modelData,
+    motionLen,
+    currentMotion,
+    currentExpression,
+    motionDur,
+    exprDur,
+    setMotionDur,
+    setExprDur,
+    chooseMotion: (name: string) => {
+      playMotion(name);
+      setCurrentMotion(name);
+    },
+    chooseExpression: (name: string) => {
+      applyExpression(name);
+      setCurrentExpression(name);
+    },
+    addMotionClip,
+    addExprClip,
+    addAudioClip,
+    characterOptions,
+    selectedCharacterId,
+    onSelectCharacter: setSelectedCharacterId,
+    characterTransform,
+    onUpdateCharacterTransform: updateSelectedCharacterTransform,
+    enableDragging,
+    setEnableDragging,
+    isDragging,
+    timelineLength,
+    playhead,
+    isPlaying,
+    startPlayback,
+    stopPlayback,
+    clearTimeline,
+    currentAudioLevel,
+    currentFps,
+    recordingQuality,
+    setRecordingQuality,
+    transparentBg,
+    setTransparentBg,
+    recState,
+    recordingTime,
+    recordingProgress,
+    blob,
+    onStartRecording: startRecording,
+    onStopRecording: stopRecording,
+    onSaveWebM: saveWebM,
+    onConvertToMov: toMov,
+    onStartOfflineExport: startOfflineExport,
+    onTakeScreenshot: () => recordingManager.takeScreenshot(),
+    onTakePartsScreenshots: () => recordingManager.takePartsScreenshots(),
+    isVp9AlphaSupported,
+  };
+
+  return (
+    <div className="editor-shell">
+      <header className="editor-topbar">
+        <div className="editor-topbar-brand">
+          <div className="editor-topbar-kicker">Live2D Movie Maker</div>
+          <h1>桌面工作区</h1>
+        </div>
+
+        <div className="editor-topbar-main">
+          <div className="topbar-select-group">
+            <label className="topbar-label" htmlFor="topbar-model-select">
+              模型
+            </label>
+            <select
+              id="topbar-model-select"
+              className="input input--topbar"
+              value={selectedModel ?? ""}
+              onChange={(event) => setSelectedModel(event.target.value || null)}
+            >
+              {modelList.length === 0 ? <option value="">未发现模型</option> : null}
+              {modelList.map((rel) => (
+                <option key={rel} value={rel}>
+                  {rel}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="topbar-button-group">
+            <button className="btn btn--quiet" onClick={refreshModels}>
+              刷新模型
+            </button>
+            <button className={`btn ${isPlaying ? "btn--accent" : "btn--primary"}`} onClick={isPlaying ? stopPlayback : startPlayback} disabled={!timelineLength && !isPlaying}>
+              {isPlaying ? "停止播放" : "开始播放"}
+            </button>
+            <button
+              className={`btn ${recState === "rec" ? "btn--danger" : "btn--accent"}`}
+              onClick={recState === "rec" ? stopRecording : startRecording}
+              disabled={recState === "offline"}
+            >
+              {recState === "rec" ? "停止录制" : "录制 WebM"}
+            </button>
+            <button className="btn btn--quiet" onClick={addAudioClip}>
+              导入音频
+            </button>
+            <button className="btn btn--quiet" onClick={() => setShowWebGALMode(true)}>
+              WebGAL 工具
+            </button>
+          </div>
+        </div>
+
+        <div className="editor-topbar-status">
+          <span>{selectedModelDisplayName}</span>
+          <span>角色 {selectedCharacterLabel}</span>
+          <span>状态 {toolbarAction === "record-stop" ? "录制中" : toolbarAction === "stop" ? "播放中" : "待机"}</span>
+        </div>
+      </header>
+
+      <div className="editor-workspace">
+        <aside className={`workspace-dock workspace-dock--left ${isResourcePaneCollapsed ? "is-collapsed" : ""}`}>
+          {isResourcePaneCollapsed ? (
+            <button className="dock-toggle" onClick={() => setIsResourcePaneCollapsed(false)}>
+              资源
+            </button>
+          ) : (
+            <ControlPanel
+              {...panelProps}
+              mode="resources"
+              onCollapse={() => setIsResourcePaneCollapsed(true)}
+            />
+          )}
+        </aside>
+
+        <main className="editor-main">
+          <section className="monitor-shell">
+            <div className="monitor-header">
+              <div className="monitor-heading">
+                <div className="monitor-kicker">Program Monitor</div>
+                <h2>{selectedModelDisplayName}</h2>
+              </div>
+              <div className="monitor-meta">
+                <span>{transparentBg ? "透明背景" : "实色背景"}</span>
+                <span>角色 {selectedCharacterLabel}</span>
+                <span>时间线 {timelineLength.toFixed(2)} 秒</span>
+              </div>
+            </div>
+
+            <div className="monitor-stage">
+              <div
+                ref={containerRef}
+                className={`monitor-canvas-host ${transparentBg ? "is-transparent" : "is-solid"}`}
+                data-transparent={transparentBg}
+              />
+
+              {!selectedModel ? (
+                <div className="monitor-empty">
+                  <strong>先加载一个 Live2D 模型</strong>
+                  <span>在顶部或左侧资源区选择模型，然后开始预览、编排和导出。</span>
+                </div>
+              ) : null}
+
+              <div className="monitor-overlay monitor-overlay--top">
+                <span>预览器</span>
+                <span>{currentMotion ? `动作 ${currentMotion}` : "等待动作"}</span>
+                <span>{currentExpression ? `表情 ${currentExpression}` : "默认表情"}</span>
+              </div>
+
+              <div className="monitor-overlay monitor-overlay--bottom">
+                <span>FPS {currentFps.toFixed(1)}</span>
+                <span>播放头 {playhead.toFixed(2)} 秒</span>
+                <span>{enableDragging ? "允许拖拽" : "拖拽关闭"}</span>
+              </div>
+            </div>
+          </section>
+        </main>
+
+        <aside className={`workspace-dock workspace-dock--right ${isInspectorPaneCollapsed ? "is-collapsed" : ""}`}>
+          {isInspectorPaneCollapsed ? (
+            <button className="dock-toggle" onClick={() => setIsInspectorPaneCollapsed(false)}>
+              检查器
+            </button>
+          ) : (
+            <ControlPanel
+              {...panelProps}
+              mode="inspector"
+              activeInspectorTab={activeInspectorTab}
+              onChangeInspectorTab={setActiveInspectorTab}
+              onCollapse={() => setIsInspectorPaneCollapsed(true)}
+            />
+          )}
+        </aside>
+      </div>
+
+      <section className="timeline-shell">
+        <Timeline
+          motionClips={motionClips}
+          exprClips={exprClips}
+          audioClips={audioClips}
+          playheadSec={playhead}
+          onChangeClip={changeClip}
+          onRemoveClip={(track, id) => {
+            if (track === "motion") setMotionClips(prev => prev.filter(c => c.id !== id));
+            else if (track === "expr") setExprClips(prev => prev.filter(c => c.id !== id));
+            else if (track === "audio") {
+              setAudioClips(prev => prev.filter(c => c.id !== id));
+              const audio = audioManager.audioRefs.current.get(id);
+              if (audio) {
+                audio.pause();
+                audio.src = "";
+                audioManager.audioRefs.current.delete(id);
+              }
+              const analyzerData = audioManager.audioAnalyzersRef.current.get(id);
+              if (analyzerData) {
+                try {
+                  analyzerData.source.disconnect();
+                  analyzerData.analyzer.disconnect();
+                } catch {}
+                audioManager.audioAnalyzersRef.current.delete(id);
+              }
+            }
+          }}
+          onSetPlayhead={setPlayheadSec}
+          onStartPlayback={startPlayback}
+          onStopPlayback={stopPlayback}
+          isPlaying={isPlaying}
+        />
+      </section>
+
+      {showWebGALMode && (
+        <div className="editor-overlay">
           <WebGALMode
             onClose={() => setShowWebGALMode(false)}
             onImportTimeline={importWebGALTimeline}
             onExitWebGALMode={exitWebGALMode}
           />
-        )}
-
-      {/* ???? */}
-      {showControls && (
-                 <ControlPanel
-           onClose={() => setShowControls(false)}
-           onToggleWebGALMode={() => setShowWebGALMode(!showWebGALMode)}
-
-          // ????
-          modelList={modelList}
-          selectedModel={selectedModel}
-          onSelectModel={(rel) => setSelectedModel(rel || null)}
-          onRefreshModels={refreshModels}
-
-          modelData={modelData}
-          motionLen={motionLen}
-          currentMotion={currentMotion}
-          currentExpression={currentExpression}
-          motionDur={motionDur}
-          exprDur={exprDur}
-          setMotionDur={setMotionDur}
-          setExprDur={setExprDur}
-          chooseMotion={(name) => { playMotion(name); setCurrentMotion(name); }}
-          chooseExpression={(name) => { applyExpression(name); setCurrentExpression(name); }}
-          addMotionClip={addMotionClip}
-          addExprClip={addExprClip}
-          addAudioClip={addAudioClip}
-          characterOptions={characterOptions}
-          selectedCharacterId={selectedCharacterId}
-          onSelectCharacter={setSelectedCharacterId}
-          characterTransform={characterTransform}
-          onUpdateCharacterTransform={updateSelectedCharacterTransform}
-
-          enableDragging={enableDragging}
-          setEnableDragging={setEnableDragging}
-          isDragging={isDragging}
-          timelineLength={Math.max(
-            motionClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
-            exprClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
-            audioClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0)
-          )}
-          playhead={playhead}
-          isPlaying={isPlaying}
-          startPlayback={startPlayback}
-          stopPlayback={stopPlayback}
-          clearTimeline={clearTimeline}
-          onChangeClip={changeClip}
-          onSetPlayhead={setPlayheadSec}
-          currentAudioLevel={currentAudioLevel}
-          currentFps={currentFps}
-        />
-      )}
-
-      {/* ????*/}
-      <Timeline
-        motionClips={motionClips}
-        exprClips={exprClips}
-        audioClips={audioClips}
-        playheadSec={playhead}
-        onChangeClip={changeClip}
-        onRemoveClip={(track, id) => {
-          if (track === "motion") setMotionClips(prev => prev.filter(c => c.id !== id));
-          else if (track === "expr") setExprClips(prev => prev.filter(c => c.id !== id));
-          else if (track === "audio") {
-            setAudioClips(prev => prev.filter(c => c.id !== id));
-            // ??????
-            const audio = audioManager.audioRefs.current.get(id);
-            if (audio) {
-              audio.pause();
-              audio.src = '';
-              audioManager.audioRefs.current.delete(id);
-            }
-            // ????????
-            const analyzerData = audioManager.audioAnalyzersRef.current.get(id);
-            if (analyzerData) {
-              try {
-                analyzerData.source.disconnect();
-                analyzerData.analyzer.disconnect();
-              } catch { /* empty */ }
-              audioManager.audioAnalyzersRef.current.delete(id);
-            }
-          }
-        }}
-        onSetPlayhead={setPlayheadSec}
-        onStartPlayback={startPlayback}
-        onStopPlayback={stopPlayback}
-        isPlaying={isPlaying}
-      />
-
-      {/* ?????????? */}
-      <ExportToolbar
-        recordingQuality={recordingQuality}
-        setRecordingQuality={setRecordingQuality}
-        transparentBg={transparentBg}
-        setTransparentBg={setTransparentBg}
-        recState={recState}
-        recordingTime={recordingTime}
-        recordingProgress={recordingProgress}
-        blob={blob}
-        onStartRecording={startRecording}
-        onStopRecording={stopRecording}
-        onSaveWebM={saveWebM}
-        onConvertToMov={toMov}
-        onStartOfflineExport={startOfflineExport}
-        onTakeScreenshot={() => recordingManager.takeScreenshot()}
-        onTakePartsScreenshots={() => recordingManager.takePartsScreenshots()}
-        isVp9AlphaSupported={isVp9AlphaSupported}
-      />
-
-      {!showControls && (
-        <button className="l2d-toggle" onClick={() => setShowControls(true)}>
-          ??????????
-        </button>
+        </div>
       )}
     </div>
   );
