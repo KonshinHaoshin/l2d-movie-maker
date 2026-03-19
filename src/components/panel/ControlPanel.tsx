@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import type { Clip, TrackKind } from "../timeline/types";
+import ExportToolbar from "../ExportToolbar";
 
 interface Motion {
   name: string;
@@ -29,8 +29,14 @@ type CharacterTransform = {
   rotation: number;
 };
 
+export type ControlPanelMode = "resources" | "inspector";
+export type InspectorTab = "character" | "export" | "audio" | "project";
+
 type Props = {
-  onClose: () => void;
+  mode: ControlPanelMode;
+  activeInspectorTab?: InspectorTab;
+  onChangeInspectorTab?: (tab: InspectorTab) => void;
+  onCollapse?: () => void;
   onToggleWebGALMode: () => void;
 
   modelList: string[];
@@ -54,7 +60,6 @@ type Props = {
   addMotionClip: (name: string) => void;
   addExprClip: (name: string) => void;
   addAudioClip: () => void;
-  debugModelParameters?: () => void;
   currentAudioLevel?: number;
   currentFps?: number;
 
@@ -73,20 +78,89 @@ type Props = {
   isPlaying: boolean;
   startPlayback: () => void;
   stopPlayback: () => void;
-
   clearTimeline: () => void;
 
-  onChangeClip?: (
-    track: TrackKind,
-    id: string,
-    patch: Partial<Pick<Clip, "start" | "duration">>
-  ) => void;
-  onSetPlayhead?: (sec: number) => void;
+  recordingQuality: "low" | "medium" | "high";
+  setRecordingQuality: (quality: "low" | "medium" | "high") => void;
+  transparentBg: boolean;
+  setTransparentBg: (transparent: boolean) => void;
+  recState: "idle" | "rec" | "done" | "offline";
+  recordingTime: number;
+  recordingProgress: number;
+  blob: Blob | null;
+  onStartRecording: () => void;
+  onStopRecording: () => void;
+  onSaveWebM: () => void;
+  onConvertToMov: () => void;
+  onStartOfflineExport: () => void;
+  onTakeScreenshot: () => void;
+  onTakePartsScreenshots: () => void;
+  isVp9AlphaSupported: () => boolean;
 };
 
-const ControlPanel: React.FC<Props> = (props) => {
+const inspectorTabs: Array<{ id: InspectorTab; label: string }> = [
+  { id: "character", label: "角色" },
+  { id: "export", label: "导出" },
+  { id: "audio", label: "音频" },
+  { id: "project", label: "项目" },
+];
+
+function PanelSection({
+  title,
+  meta,
+  children,
+}: {
+  title: string;
+  meta?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="workspace-section">
+      <div className="workspace-section-header">
+        <h3 className="workspace-section-title">{title}</h3>
+        {meta ? <span className="workspace-section-meta">{meta}</span> : null}
+      </div>
+      <div className="workspace-section-body">{children}</div>
+    </section>
+  );
+}
+
+function Pager({
+  page,
+  pageCount,
+  onPageChange,
+}: {
+  page: number;
+  pageCount: number;
+  onPageChange: (next: number) => void;
+}) {
+  return (
+    <div className="asset-pager">
+      <button className="btn btn--quiet" onClick={() => onPageChange(1)} disabled={page <= 1}>
+        首页
+      </button>
+      <button className="btn btn--quiet" onClick={() => onPageChange(Math.max(1, page - 1))} disabled={page <= 1}>
+        上一页
+      </button>
+      <span className="pane-note">
+        {page} / {pageCount}
+      </span>
+      <button className="btn btn--quiet" onClick={() => onPageChange(Math.min(pageCount, page + 1))} disabled={page >= pageCount}>
+        下一页
+      </button>
+      <button className="btn btn--quiet" onClick={() => onPageChange(pageCount)} disabled={page >= pageCount}>
+        末页
+      </button>
+    </div>
+  );
+}
+
+export default function ControlPanel(props: Props) {
   const {
-    onClose,
+    mode,
+    activeInspectorTab = "character",
+    onChangeInspectorTab,
+    onCollapse,
     onToggleWebGALMode,
     modelList,
     selectedModel,
@@ -121,60 +195,82 @@ const ControlPanel: React.FC<Props> = (props) => {
     clearTimeline,
     currentAudioLevel,
     currentFps,
+    recordingQuality,
+    setRecordingQuality,
+    transparentBg,
+    setTransparentBg,
+    recState,
+    recordingTime,
+    recordingProgress,
+    blob,
+    onStartRecording,
+    onStopRecording,
+    onSaveWebM,
+    onConvertToMov,
+    onStartOfflineExport,
+    onTakeScreenshot,
+    onTakePartsScreenshots,
+    isVp9AlphaSupported,
   } = props;
 
   const [motionQuery, setMotionQuery] = useState("");
   const [motionPage, setMotionPage] = useState(1);
-  const [motionPageSize, setMotionPageSize] = useState(24);
+  const [motionPageSize, setMotionPageSize] = useState(12);
+
+  const [exprQuery, setExprQuery] = useState("");
+  const [exprPage, setExprPage] = useState(1);
+  const [exprPageSize, setExprPageSize] = useState(12);
+
   useEffect(() => {
     setMotionPage(1);
   }, [motionQuery, motionPageSize, modelData]);
 
-  const allMotionNames = useMemo(
-    () => (modelData ? Object.keys(modelData.motions || {}) : []),
-    [modelData]
-  );
-  const filteredMotions = useMemo(
-    () =>
-      allMotionNames.filter((n) =>
-        n.toLowerCase().includes(motionQuery.trim().toLowerCase())
-      ),
-    [allMotionNames, motionQuery]
-  );
-  const motionPageCount = Math.max(1, Math.ceil(filteredMotions.length / motionPageSize));
-  const motionPageSafe = Math.min(motionPage, motionPageCount);
-  const motionSlice = filteredMotions.slice(
-    (motionPageSafe - 1) * motionPageSize,
-    motionPageSafe * motionPageSize
-  );
-
-  const [exprQuery, setExprQuery] = useState("");
-  const [exprPage, setExprPage] = useState(1);
-  const [exprPageSize, setExprPageSize] = useState(24);
   useEffect(() => {
     setExprPage(1);
   }, [exprQuery, exprPageSize, modelData]);
 
-  const allExprNames = useMemo(
-    () => (modelData ? (modelData.expressions || []).map((e) => e.name) : []),
-    [modelData]
-  );
-  const filteredExprs = useMemo(
-    () =>
-      allExprNames.filter((n) =>
-        n.toLowerCase().includes(exprQuery.trim().toLowerCase())
-      ),
-    [allExprNames, exprQuery]
-  );
-  const exprPageCount = Math.max(1, Math.ceil(filteredExprs.length / exprPageSize));
-  const exprPageSafe = Math.min(exprPage, exprPageCount);
-  const exprSlice = filteredExprs.slice(
-    (exprPageSafe - 1) * exprPageSize,
-    exprPageSafe * exprPageSize
+  const allMotionNames = useMemo(
+    () => (modelData ? Object.keys(modelData.motions || {}) : []),
+    [modelData],
   );
 
-  const formatTransformValue = (n: number, digits: number, fallback: string) =>
-    Number.isFinite(n) ? n.toFixed(digits) : fallback;
+  const filteredMotions = useMemo(
+    () => allMotionNames.filter((name) => name.toLowerCase().includes(motionQuery.trim().toLowerCase())),
+    [allMotionNames, motionQuery],
+  );
+
+  const motionPageCount = Math.max(1, Math.ceil(filteredMotions.length / motionPageSize));
+  const safeMotionPage = Math.min(motionPage, motionPageCount);
+  const motionSlice = filteredMotions.slice((safeMotionPage - 1) * motionPageSize, safeMotionPage * motionPageSize);
+
+  const allExpressionNames = useMemo(
+    () => (modelData ? (modelData.expressions || []).map((expr) => expr.name) : []),
+    [modelData],
+  );
+
+  const filteredExpressions = useMemo(
+    () => allExpressionNames.filter((name) => name.toLowerCase().includes(exprQuery.trim().toLowerCase())),
+    [allExpressionNames, exprQuery],
+  );
+
+  const expressionPageCount = Math.max(1, Math.ceil(filteredExpressions.length / exprPageSize));
+  const safeExpressionPage = Math.min(exprPage, expressionPageCount);
+  const expressionSlice = filteredExpressions.slice(
+    (safeExpressionPage - 1) * exprPageSize,
+    safeExpressionPage * exprPageSize,
+  );
+
+  const selectedModelParts = selectedModel ? selectedModel.split("/") : [];
+  const selectedModelLabel = selectedModel
+    ? selectedModelParts[selectedModelParts.length - 2] ?? selectedModel
+    : "未选择模型";
+  const selectedCharacterLabel =
+    characterOptions.find((option) => option.id === selectedCharacterId)?.label ??
+    characterOptions[0]?.label ??
+    "主角色";
+
+  const formatTransformValue = (value: number, digits: number, fallback: string) =>
+    Number.isFinite(value) ? value.toFixed(digits) : fallback;
 
   const [transformDraft, setTransformDraft] = useState({
     x: formatTransformValue(characterTransform.x, 1, "0"),
@@ -202,8 +298,7 @@ const ControlPanel: React.FC<Props> = (props) => {
   ]);
 
   const applyTransformDraft = (key: keyof CharacterTransform) => {
-    const raw = transformDraft[key];
-    const parsed = Number(raw);
+    const parsed = Number(transformDraft[key]);
     if (!Number.isFinite(parsed)) {
       setTransformDraft((prev) => ({
         ...prev,
@@ -219,396 +314,421 @@ const ControlPanel: React.FC<Props> = (props) => {
     onUpdateCharacterTransform({ [key]: normalized });
     setTransformDraft((prev) => ({
       ...prev,
-      [key]:
-        key === "scaleX" || key === "scaleY"
-          ? normalized.toFixed(2)
-          : normalized.toFixed(1),
+      [key]: key === "scaleX" || key === "scaleY" ? normalized.toFixed(2) : normalized.toFixed(1),
     }));
   };
 
-  const handleTransformKeyDown = (key: keyof CharacterTransform) => (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key !== " ") return;
-    e.preventDefault();
-    applyTransformDraft(key);
+  const handleTransformKeyDown =
+    (key: keyof CharacterTransform) => (event: React.KeyboardEvent<HTMLInputElement>) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      applyTransformDraft(key);
+    };
+
+  const renderLevelMeter = () => (
+    <div className="meter-card">
+      <div className="meter-row">
+        <span className="pane-note">实时电平</span>
+        <span className="pane-note">{(currentAudioLevel ?? 0).toFixed(1)}%</span>
+      </div>
+      <div className="audio-meter">
+        <div className="audio-meter-fill" style={{ width: `${currentAudioLevel ?? 0}%` }} />
+      </div>
+    </div>
+  );
+
+  const renderResourceList = (
+    items: string[],
+    activeValue: string,
+    onPreview: (name: string) => void,
+    onAdd: (name: string) => void,
+    kind: "motion" | "expression",
+  ) => {
+    if (items.length === 0) {
+      return (
+        <div className="pane-empty">
+          <strong>{kind === "motion" ? "还没有动作素材" : "还没有表情素材"}</strong>
+          <span>先加载模型，再从这里预览并加入时间线。</span>
+        </div>
+      );
+    }
+
+    return (
+      <div className="asset-list">
+        {items.map((name) => (
+          <div key={name} className={`asset-item ${activeValue === name ? "is-active" : ""}`}>
+            <div className="asset-copy">
+              <strong>{name}</strong>
+              <span>
+                {kind === "motion" && motionLen[name] ? `${motionLen[name].toFixed(2)} 秒` : kind === "motion" ? "动作素材" : "表情素材"}
+              </span>
+            </div>
+            <div className="asset-actions">
+              <button className="btn btn--quiet" onClick={() => onPreview(name)}>
+                预览
+              </button>
+              <button className="btn btn--primary" onClick={() => onAdd(name)}>
+                上轨
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
   };
 
+  const paneTitle = mode === "resources" ? "资源浏览器" : "检查器";
+
   return (
-    <div className="l2d-panel">
-      <div className="l2d-panel-header">
-        <h3 className="l2d-panel-title">Live2D Control</h3>
-        <button className="l2d-close" onClick={onClose}>
-          x
-        </button>
+    <div className={`workspace-pane workspace-pane--${mode}`}>
+      <div className="workspace-pane-header">
+        <div>
+          <div className="workspace-pane-kicker">{mode === "resources" ? "素材面板" : "参数面板"}</div>
+          <h2 className="workspace-pane-title">{paneTitle}</h2>
+        </div>
+        {onCollapse ? (
+          <button className="btn btn--quiet btn--icon" onClick={onCollapse} aria-label={`收起${paneTitle}`}>
+            收起
+          </button>
+        ) : null}
       </div>
 
-      <div className="l2d-section">
-        <h4 className="l2d-section-title">Model</h4>
-        <div className="row" style={{ gap: 8 }}>
-          <select
-            className="input"
-            value={selectedModel ?? ""}
-            onChange={(e) => onSelectModel(e.target.value || null)}
-            style={{ width: "100%" }}
-          >
-            {modelList.length === 0 && (
-              <option value="">No model found in model/</option>
-            )}
-            {modelList.map((rel) => (
-              <option key={rel} value={rel}>
-                {rel}
-              </option>
-            ))}
-          </select>
-          <span className="muted" style={{ whiteSpace: "nowrap" }}>
-            {modelList.length}
-          </span>
-        </div>
-        <div className="row" style={{ gap: 8, marginTop: 6 }}>
-          {onRefreshModels && (
-            <button className="btn" onClick={onRefreshModels} style={{ fontSize: 12 }}>
-              Refresh
-            </button>
-          )}
-          <button className="btn" onClick={onToggleWebGALMode} style={{ fontSize: 12 }}>
-            WebGAL
-          </button>
-        </div>
-      </div>
-
-      <div className="l2d-section">
-        <h4 className="l2d-section-title">Motions</h4>
-        <div className="row" style={{ gap: 8 }}>
-          <input
-            className="input"
-            placeholder="Search motions"
-            value={motionQuery}
-            onChange={(e) => setMotionQuery(e.target.value)}
-          />
-          <span className="muted" style={{ whiteSpace: "nowrap" }}>
-            {filteredMotions.length}
-          </span>
-        </div>
-        <div className="row" style={{ gap: 8, marginTop: 6 }}>
-          <span className="muted">Page</span>
-          <select
-            className="input"
-            value={motionPageSize}
-            onChange={(e) => setMotionPageSize(Number(e.target.value))}
-            style={{ width: 80 }}
-          >
-            {[12, 24, 36, 48, 60].map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-          <div style={{ flex: 1 }} />
-          <button className="btn" onClick={() => setMotionPage(1)} disabled={motionPageSafe <= 1}>
-            {'<<'}
-          </button>
-          <button
-            className="btn"
-            onClick={() => setMotionPage((p) => Math.max(1, p - 1))}
-            disabled={motionPageSafe <= 1}
-          >
-            {'<'}
-          </button>
-          <span className="muted">
-            {motionPageSafe} / {motionPageCount}
-          </span>
-          <button
-            className="btn"
-            onClick={() => setMotionPage((p) => Math.min(motionPageCount, p + 1))}
-            disabled={motionPageSafe >= motionPageCount}
-          >
-            {'>'}
-          </button>
-          <button
-            className="btn"
-            onClick={() => setMotionPage(motionPageCount)}
-            disabled={motionPageSafe >= motionPageCount}
-          >
-            {'>>'}
-          </button>
-        </div>
-
-        <div className="chip-list" style={{ marginTop: 8 }}>
-          {motionSlice.map((name) => {
-            const sec = motionLen[name];
-            return (
-              <button
-                key={name}
-                className={`chip ${currentMotion === name ? "is-active" : ""}`}
-                title="Click to play, double click to add clip"
-                onClick={() => chooseMotion(name)}
-                onDoubleClick={() => addMotionClip(name)}
-              >
-                {name}
-                {sec ? ` (${sec.toFixed(2)}s)` : ""}
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="row" style={{ marginTop: 8 }}>
-          <span>Clip(s)</span>
-          <input
-            className="input"
-            type="number"
-            value={motionDur}
-            step={0.1}
-            min={0.1}
-            onChange={(e) => setMotionDur(Math.max(0.1, Number(e.target.value) || 0.1))}
-          />
-          <button className="btn" onClick={() => currentMotion && addMotionClip(currentMotion)}>
-            Add Current
-          </button>
-        </div>
-      </div>
-
-      <div className="l2d-section">
-        <h4 className="l2d-section-title">Expressions</h4>
-
-        <div className="row" style={{ gap: 8 }}>
-          <input
-            className="input"
-            placeholder="Search expressions"
-            value={exprQuery}
-            onChange={(e) => setExprQuery(e.target.value)}
-          />
-          <span className="muted" style={{ whiteSpace: "nowrap" }}>
-            {filteredExprs.length}
-          </span>
-        </div>
-        <div className="row" style={{ gap: 8, marginTop: 6 }}>
-          <span className="muted">Page</span>
-          <select
-            className="input"
-            value={exprPageSize}
-            onChange={(e) => setExprPageSize(Number(e.target.value))}
-            style={{ width: 80 }}
-          >
-            {[12, 24, 36, 48, 60].map((n) => (
-              <option key={n} value={n}>
-                {n}
-              </option>
-            ))}
-          </select>
-          <div style={{ flex: 1 }} />
-          <button className="btn" onClick={() => setExprPage(1)} disabled={exprPageSafe <= 1}>
-            {'<<'}
-          </button>
-          <button
-            className="btn"
-            onClick={() => setExprPage((p) => Math.max(1, p - 1))}
-            disabled={exprPageSafe <= 1}
-          >
-            {'<'}
-          </button>
-          <span className="muted">
-            {exprPageSafe} / {exprPageCount}
-          </span>
-          <button
-            className="btn"
-            onClick={() => setExprPage((p) => Math.min(exprPageCount, p + 1))}
-            disabled={exprPageSafe >= exprPageCount}
-          >
-            {'>'}
-          </button>
-          <button className="btn" onClick={() => setExprPage(exprPageCount)} disabled={exprPageSafe >= exprPageCount}>
-            {'>>'}
-          </button>
-        </div>
-
-        <div className="chip-list" style={{ marginTop: 8 }}>
-          {exprSlice.map((name) => (
+      {mode === "inspector" ? (
+        <div className="inspector-tabs" role="tablist" aria-label="检查器分页">
+          {inspectorTabs.map((tab) => (
             <button
-              key={name}
-              className={`chip ${currentExpression === name ? "is-active" : ""}`}
-              title="Click to apply, double click to add clip"
-              onClick={() => chooseExpression(name)}
-              onDoubleClick={() => addExprClip(name)}
+              key={tab.id}
+              className={`inspector-tab ${activeInspectorTab === tab.id ? "is-active" : ""}`}
+              onClick={() => onChangeInspectorTab?.(tab.id)}
+              role="tab"
+              aria-selected={activeInspectorTab === tab.id}
             >
-              {name}
+              {tab.label}
             </button>
           ))}
         </div>
+      ) : null}
 
-        <div className="row" style={{ marginTop: 8 }}>
-          <span>Clip(s)</span>
-          <input
-            className="input"
-            type="number"
-            value={exprDur}
-            step={0.1}
-            min={0.1}
-            onChange={(e) => setExprDur(Math.max(0.1, Number(e.target.value) || 0.1))}
-          />
-          <button className="btn" onClick={() => currentExpression && addExprClip(currentExpression)}>
-            Add Current
-          </button>
-        </div>
-      </div>
-
-      <div className="l2d-section">
-        <h4 className="l2d-section-title">Character Transform</h4>
-        <div className="row" style={{ gap: 8 }}>
-          <span className="muted">Role</span>
-          <select
-            className="input"
-            value={selectedCharacterId}
-            onChange={(e) => onSelectCharacter(e.target.value)}
-            style={{ width: "100%" }}
-          >
-            {characterOptions.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="row" style={{ gap: 8, marginTop: 6 }}>
-          <span className="muted">X</span>
-          <input
-            className="input"
-            type="number"
-            value={transformDraft.x}
-            onChange={(e) => setTransformDraft((prev) => ({ ...prev, x: e.target.value }))}
-            onBlur={() => applyTransformDraft("x")}
-            onKeyDown={handleTransformKeyDown("x")}
-          />
-          <span className="muted">Y</span>
-          <input
-            className="input"
-            type="number"
-            value={transformDraft.y}
-            onChange={(e) => setTransformDraft((prev) => ({ ...prev, y: e.target.value }))}
-            onBlur={() => applyTransformDraft("y")}
-            onKeyDown={handleTransformKeyDown("y")}
-          />
-        </div>
-        <div className="row" style={{ gap: 8, marginTop: 6 }}>
-          <span className="muted">ScaleX</span>
-          <input
-            className="input"
-            type="number"
-            step={0.01}
-            value={transformDraft.scaleX}
-            onChange={(e) => setTransformDraft((prev) => ({ ...prev, scaleX: e.target.value }))}
-            onBlur={() => applyTransformDraft("scaleX")}
-            onKeyDown={handleTransformKeyDown("scaleX")}
-          />
-          <span className="muted">ScaleY</span>
-          <input
-            className="input"
-            type="number"
-            step={0.01}
-            value={transformDraft.scaleY}
-            onChange={(e) => setTransformDraft((prev) => ({ ...prev, scaleY: e.target.value }))}
-            onBlur={() => applyTransformDraft("scaleY")}
-            onKeyDown={handleTransformKeyDown("scaleY")}
-          />
-        </div>
-        <div className="row" style={{ gap: 8, marginTop: 6 }}>
-          <span className="muted">Rotation</span>
-          <input
-            className="input"
-            type="number"
-            step={0.1}
-            value={transformDraft.rotation}
-            onChange={(e) => setTransformDraft((prev) => ({ ...prev, rotation: e.target.value }))}
-            onBlur={() => applyTransformDraft("rotation")}
-            onKeyDown={handleTransformKeyDown("rotation")}
-          />
-        </div>
-      </div>
-
-      <div className="l2d-section">
-        <h4 className="l2d-section-title">Drag</h4>
-        <label className="muted">
-          <input
-            type="checkbox"
-            checked={enableDragging}
-            onChange={(e) => setEnableDragging(e.target.checked)}
-            style={{ width: 16, height: 16, marginRight: 8 }}
-          />
-          Enable drag {isDragging ? "(dragging)" : ""}
-        </label>
-      </div>
-
-      <div className="l2d-section muted" style={{ fontSize: 12 }}>
-        Total: {timelineLength.toFixed(2)}s
-        <br />
-        Playhead: {playhead.toFixed(2)}s
-        <br />
-        FPS: {typeof currentFps === "number" ? currentFps.toFixed(1) : "--"}
-        <br />
-        <div className="row" style={{ marginTop: 6, gap: 6 }}>
-          <button className="btn btn--primary" onClick={startPlayback} disabled={isPlaying || timelineLength <= 0}>
-            Play
-          </button>
-          <button className="btn btn--danger" onClick={stopPlayback} disabled={!isPlaying}>
-            Stop
-          </button>
-          <button className="btn" onClick={clearTimeline}>
-            Clear
-          </button>
-          <button className="btn" onClick={addAudioClip} style={{ background: "#ff6b35", color: "white" }}>
-            Import Audio
-          </button>
-        </div>
-
-        {currentAudioLevel !== undefined && (
-          <div
-            style={{
-              marginTop: 8,
-              padding: 8,
-              background: "rgba(107,53,255,0.1)",
-              borderRadius: 4,
-              fontSize: 11,
-            }}
-          >
-            Audio Level
-            <br />
-            <div
-              style={{
-                width: "100%",
-                height: "20px",
-                background: "#333",
-                borderRadius: "10px",
-                overflow: "hidden",
-                position: "relative",
-              }}
-            >
-              <div
-                style={{
-                  width: `${currentAudioLevel}%`,
-                  height: "100%",
-                  background: "linear-gradient(90deg, #4CAF50, #FF9800, #F44336)",
-                  transition: "width 0.1s ease",
-                  borderRadius: "10px",
-                }}
-              />
-              <div
-                style={{
-                  position: "absolute",
-                  top: "50%",
-                  left: "50%",
-                  transform: "translate(-50%, -50%)",
-                  color: "white",
-                  fontSize: "10px",
-                  fontWeight: "bold",
-                  textShadow: "1px 1px 2px rgba(0,0,0,0.8)",
-                }}
-              >
-                {currentAudioLevel.toFixed(1)}%
+      <div className="workspace-pane-scroll">
+        {mode === "resources" ? (
+          <>
+            <PanelSection title="项目" meta={`${modelList.length} 个模型`}>
+              <div className="field-stack">
+                <label className="field-label" htmlFor="resource-model-select">
+                  当前模型
+                </label>
+                <select
+                  id="resource-model-select"
+                  className="input input--full"
+                  value={selectedModel ?? ""}
+                  onChange={(event) => onSelectModel(event.target.value || null)}
+                >
+                  {modelList.length === 0 ? <option value="">model/ 下未发现模型</option> : null}
+                  {modelList.map((rel) => (
+                    <option key={rel} value={rel}>
+                      {rel}
+                    </option>
+                  ))}
+                </select>
               </div>
-            </div>
-          </div>
+              <div className="button-row">
+                {onRefreshModels ? (
+                  <button className="btn btn--quiet" onClick={onRefreshModels}>
+                    刷新模型
+                  </button>
+                ) : null}
+                <button className="btn btn--quiet" onClick={onToggleWebGALMode}>
+                  WebGAL 工具
+                </button>
+              </div>
+            </PanelSection>
+
+            <PanelSection title="动作素材" meta={`${filteredMotions.length} 条`}>
+              <div className="toolbar-row">
+                <input
+                  className="input input--full"
+                  placeholder="搜索动作名"
+                  value={motionQuery}
+                  onChange={(event) => setMotionQuery(event.target.value)}
+                />
+                <select
+                  className="input input--compact"
+                  value={motionPageSize}
+                  onChange={(event) => setMotionPageSize(Number(event.target.value))}
+                  aria-label="动作分页数量"
+                >
+                  {[8, 12, 16, 24].map((size) => (
+                    <option key={size} value={size}>
+                      {size}/页
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <Pager page={safeMotionPage} pageCount={motionPageCount} onPageChange={setMotionPage} />
+              {renderResourceList(motionSlice, currentMotion, chooseMotion, addMotionClip, "motion")}
+              <div className="field-inline">
+                <label className="field-label" htmlFor="motion-duration">
+                  默认片段时长
+                </label>
+                <input
+                  id="motion-duration"
+                  className="input"
+                  type="number"
+                  min={0.1}
+                  step={0.1}
+                  value={motionDur}
+                  onChange={(event) => setMotionDur(Math.max(0.1, Number(event.target.value) || 0.1))}
+                />
+                <span className="pane-note">秒</span>
+              </div>
+            </PanelSection>
+
+            <PanelSection title="表情素材" meta={`${filteredExpressions.length} 条`}>
+              <div className="toolbar-row">
+                <input
+                  className="input input--full"
+                  placeholder="搜索表情名"
+                  value={exprQuery}
+                  onChange={(event) => setExprQuery(event.target.value)}
+                />
+                <select
+                  className="input input--compact"
+                  value={exprPageSize}
+                  onChange={(event) => setExprPageSize(Number(event.target.value))}
+                  aria-label="表情分页数量"
+                >
+                  {[8, 12, 16, 24].map((size) => (
+                    <option key={size} value={size}>
+                      {size}/页
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <Pager page={safeExpressionPage} pageCount={expressionPageCount} onPageChange={setExprPage} />
+              {renderResourceList(expressionSlice, currentExpression, chooseExpression, addExprClip, "expression")}
+              <div className="field-inline">
+                <label className="field-label" htmlFor="expression-duration">
+                  默认片段时长
+                </label>
+                <input
+                  id="expression-duration"
+                  className="input"
+                  type="number"
+                  min={0.1}
+                  step={0.1}
+                  value={exprDur}
+                  onChange={(event) => setExprDur(Math.max(0.1, Number(event.target.value) || 0.1))}
+                />
+                <span className="pane-note">秒</span>
+              </div>
+            </PanelSection>
+
+            <PanelSection title="音频素材">
+              <div className="pane-empty pane-empty--compact">
+                <strong>把音频导入工程</strong>
+                <span>导入后可驱动嘴型并加入底部时间线。</span>
+              </div>
+              <div className="button-row">
+                <button className="btn btn--accent" onClick={addAudioClip}>
+                  导入音频
+                </button>
+              </div>
+              {renderLevelMeter()}
+            </PanelSection>
+          </>
+        ) : (
+          <>
+            {activeInspectorTab === "character" ? (
+              <>
+                <PanelSection title="角色选择" meta={`${characterOptions.length} 个角色`}>
+                  <div className="field-stack">
+                    <label className="field-label" htmlFor="inspector-role-select">
+                      当前角色
+                    </label>
+                    <select
+                      id="inspector-role-select"
+                      className="input input--full"
+                      value={selectedCharacterId}
+                      onChange={(event) => onSelectCharacter(event.target.value)}
+                    >
+                      {characterOptions.length === 0 ? <option value="main">主角色</option> : null}
+                      {characterOptions.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="meta-grid">
+                    <div>
+                      <span>编辑目标</span>
+                      <strong>{selectedCharacterLabel}</strong>
+                    </div>
+                    <div>
+                      <span>拖拽状态</span>
+                      <strong>{isDragging ? "拖拽中" : enableDragging ? "已开启" : "已关闭"}</strong>
+                    </div>
+                  </div>
+                </PanelSection>
+
+                <PanelSection title="变换">
+                  <div className="transform-grid">
+                    {(
+                      [
+                        ["x", "X"],
+                        ["y", "Y"],
+                        ["scaleX", "缩放 X"],
+                        ["scaleY", "缩放 Y"],
+                        ["rotation", "旋转"],
+                      ] as Array<[keyof CharacterTransform, string]>
+                    ).map(([key, label]) => (
+                      <label key={key} className="field-stack">
+                        <span className="field-label">{label}</span>
+                        <input
+                          className="input"
+                          type="number"
+                          step={key === "scaleX" || key === "scaleY" ? 0.01 : 0.1}
+                          value={transformDraft[key]}
+                          onChange={(event) => setTransformDraft((prev) => ({ ...prev, [key]: event.target.value }))}
+                          onBlur={() => applyTransformDraft(key)}
+                          onKeyDown={handleTransformKeyDown(key)}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </PanelSection>
+
+                <PanelSection title="交互">
+                  <label className="switch-row">
+                    <input
+                      type="checkbox"
+                      checked={enableDragging}
+                      onChange={(event) => setEnableDragging(event.target.checked)}
+                    />
+                    <span>允许在预览区直接拖拽角色</span>
+                  </label>
+                </PanelSection>
+              </>
+            ) : null}
+
+            {activeInspectorTab === "export" ? (
+              <>
+                <PanelSection title="录制与导出">
+                  <ExportToolbar
+                    recordingQuality={recordingQuality}
+                    setRecordingQuality={setRecordingQuality}
+                    transparentBg={transparentBg}
+                    setTransparentBg={setTransparentBg}
+                    recState={recState}
+                    recordingTime={recordingTime}
+                    recordingProgress={recordingProgress}
+                    blob={blob}
+                    onStartRecording={onStartRecording}
+                    onStopRecording={onStopRecording}
+                    onSaveWebM={onSaveWebM}
+                    onConvertToMov={onConvertToMov}
+                    onStartOfflineExport={onStartOfflineExport}
+                    onTakeScreenshot={onTakeScreenshot}
+                    onTakePartsScreenshots={onTakePartsScreenshots}
+                    isVp9AlphaSupported={isVp9AlphaSupported}
+                  />
+                </PanelSection>
+                <PanelSection title="会话状态">
+                  <div className="stats-grid">
+                    <div className="stat-card">
+                      <span>时间线总长</span>
+                      <strong>{timelineLength.toFixed(2)} 秒</strong>
+                    </div>
+                    <div className="stat-card">
+                      <span>播放头</span>
+                      <strong>{playhead.toFixed(2)} 秒</strong>
+                    </div>
+                    <div className="stat-card">
+                      <span>帧率</span>
+                      <strong>{typeof currentFps === "number" ? currentFps.toFixed(1) : "--"}</strong>
+                    </div>
+                    <div className="stat-card">
+                      <span>录制状态</span>
+                      <strong>{recState === "rec" ? "录制中" : recState === "offline" ? "离线导出中" : recState === "done" ? "可下载" : "待机"}</strong>
+                    </div>
+                  </div>
+                </PanelSection>
+              </>
+            ) : null}
+
+            {activeInspectorTab === "audio" ? (
+              <>
+                <PanelSection title="播放控制">
+                  <div className="button-row">
+                    <button className="btn btn--primary" onClick={isPlaying ? stopPlayback : startPlayback} disabled={timelineLength <= 0 && !isPlaying}>
+                      {isPlaying ? "停止播放" : "开始播放"}
+                    </button>
+                    <button className="btn btn--quiet" onClick={clearTimeline}>
+                      清空时间线
+                    </button>
+                    <button className="btn btn--accent" onClick={addAudioClip}>
+                      导入音频
+                    </button>
+                  </div>
+                </PanelSection>
+                <PanelSection title="音频电平">{renderLevelMeter()}</PanelSection>
+                <PanelSection title="播放监看">
+                  <div className="stats-grid">
+                    <div className="stat-card">
+                      <span>当前播放</span>
+                      <strong>{isPlaying ? "运行中" : "已停止"}</strong>
+                    </div>
+                    <div className="stat-card">
+                      <span>播放头</span>
+                      <strong>{playhead.toFixed(2)} 秒</strong>
+                    </div>
+                  </div>
+                </PanelSection>
+              </>
+            ) : null}
+
+            {activeInspectorTab === "project" ? (
+              <>
+                <PanelSection title="工程概览">
+                  <div className="meta-grid">
+                    <div>
+                      <span>当前模型</span>
+                      <strong>{selectedModelLabel}</strong>
+                    </div>
+                    <div>
+                      <span>动作数量</span>
+                      <strong>{allMotionNames.length}</strong>
+                    </div>
+                    <div>
+                      <span>表情数量</span>
+                      <strong>{allExpressionNames.length}</strong>
+                    </div>
+                    <div>
+                      <span>角色数量</span>
+                      <strong>{characterOptions.length || 1}</strong>
+                    </div>
+                  </div>
+                </PanelSection>
+                <PanelSection title="工程操作">
+                  <div className="button-row">
+                    {onRefreshModels ? (
+                      <button className="btn btn--quiet" onClick={onRefreshModels}>
+                        刷新模型索引
+                      </button>
+                    ) : null}
+                    <button className="btn btn--quiet" onClick={clearTimeline}>
+                      清空时间线
+                    </button>
+                    <button className="btn btn--quiet" onClick={onToggleWebGALMode}>
+                      打开 WebGAL
+                    </button>
+                  </div>
+                </PanelSection>
+              </>
+            ) : null}
+          </>
         )}
       </div>
     </div>
   );
-};
-
-export default ControlPanel;
+}
