@@ -202,6 +202,7 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 14px;
   display: flex;
   flex-direction: column;
@@ -211,11 +212,16 @@
 .workspace-pane--resources .workspace-pane-scroll {
   overflow-y: auto;
   overflow-x: hidden;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
+  display: block;
+  height: 100%;
   padding: 10px;
-  gap: 10px;
+}
+
+.workspace-pane--inspector .workspace-pane-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: block;
+  height: 100%;
 }
 
 .inspector-tabs {
@@ -254,11 +260,25 @@
 }
 
 .workspace-pane--resources .workspace-section {
-  min-height: 0;
+  min-height: auto;
+}
+
+.workspace-pane--resources .workspace-section + .workspace-section {
+  margin-top: 10px;
+}
+
+.workspace-pane--inspector .workspace-section {
+  min-height: auto;
+}
+
+.workspace-pane--inspector .workspace-section + .workspace-section {
+  margin-top: 10px;
 }
 
 .workspace-section--library {
   display: block;
+  height: auto;
+  flex: none;
 }
 
 .workspace-pane--resources .workspace-section-header {
@@ -268,6 +288,7 @@
 .workspace-pane--resources .workspace-section-body {
   padding: 0 14px 14px;
   gap: 10px;
+  height: auto;
 }
 
 .workspace-section-header {
@@ -300,6 +321,13 @@
 
 .workspace-section--library .workspace-section-body {
   overflow: visible;
+  flex: none;
+}
+
+.workspace-pane--inspector .workspace-section-body {
+  height: auto;
+  overflow: visible;
+  flex: none;
 }
 
 .field-stack,
@@ -339,8 +367,9 @@
 
 .workspace-section--library .toolbar-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 92px;
+  grid-template-columns: minmax(0, 1fr) 82px 72px;
   align-items: center;
+  gap: 8px;
 }
 
 .workspace-section--library .asset-pager {
@@ -362,7 +391,7 @@
 
 .workspace-pane--resources .input,
 .workspace-pane--resources .btn {
-  min-height: 34px;
+  min-height: 32px;
 }
 
 .button-row {
@@ -373,8 +402,10 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  height: auto;
   overflow: visible;
   padding-right: 0;
+  flex: none;
 }
 
 .workspace-section--library .field-inline {
@@ -382,7 +413,7 @@
 }
 
 .workspace-pane--resources .asset-list {
-  gap: 6px;
+  gap: 4px;
 }
 
 .asset-item {
@@ -399,9 +430,9 @@
 
 .workspace-pane--resources .asset-item {
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 10px;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 9px;
 }
 
 .asset-item:hover {
@@ -425,7 +456,7 @@
 .workspace-pane--resources .asset-copy {
   flex-direction: row;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .asset-copy strong,
@@ -443,12 +474,12 @@
 }
 
 .workspace-pane--resources .asset-copy strong {
-  font-size: 0.92rem;
+  font-size: 0.88rem;
 }
 
 .workspace-pane--resources .asset-copy span {
   flex: 0 0 auto;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
 }
 
 .asset-actions {
@@ -458,13 +489,31 @@
 }
 
 .workspace-pane--resources .asset-actions {
-  gap: 6px;
+  gap: 4px;
 }
 
 .workspace-pane--resources .asset-actions .btn {
-  min-height: 30px;
-  padding-inline: 12px;
-  font-size: 0.8rem;
+  min-height: 28px;
+  padding-inline: 10px;
+  font-size: 0.76rem;
+}
+
+.library-duration-inline {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.library-duration-inline .field-label {
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.library-duration-inline .input {
+  min-width: 0;
+  padding-inline: 8px;
 }
 
 .pane-empty {
@@ -1125,7 +1174,7 @@
   }
 
   .workspace-pane--resources .workspace-pane-scroll {
-    display: flex;
+    display: block;
   }
 
   .workspace-pane--resources .workspace-section-header {
@@ -1139,15 +1188,15 @@
 
   .workspace-section--library .asset-pager .btn {
     padding-inline: 8px;
-    font-size: 0.8rem;
+    font-size: 0.76rem;
   }
 
   .workspace-pane--resources .asset-item {
-    padding: 7px 8px;
+    padding: 6px 7px;
   }
 
   .workspace-pane--resources .asset-actions .btn {
-    padding-inline: 10px;
+    padding-inline: 8px;
   }
 
   .timeline-shell {

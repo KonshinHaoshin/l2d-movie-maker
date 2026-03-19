@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import ExportToolbar from "../ExportToolbar";
 
 interface Motion {
@@ -220,6 +220,34 @@ export default function ControlPanel(props: Props) {
   const [exprQuery, setExprQuery] = useState("");
   const [exprPage, setExprPage] = useState(1);
   const [exprPageSize, setExprPageSize] = useState(12);
+  const paneScrollRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const container = paneScrollRef.current;
+    if (!container) return;
+
+    const handleWheel = (event: WheelEvent) => {
+      const canScroll = container.scrollHeight > container.clientHeight + 1;
+      if (!canScroll) return;
+
+      const maxScrollTop = container.scrollHeight - container.clientHeight;
+      const nextScrollTop = Math.max(0, Math.min(maxScrollTop, container.scrollTop + event.deltaY));
+      const shouldConsume =
+        (event.deltaY < 0 && container.scrollTop > 0) ||
+        (event.deltaY > 0 && container.scrollTop < maxScrollTop);
+
+      if (!shouldConsume) return;
+
+      container.scrollTop = nextScrollTop;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    container.addEventListener("wheel", handleWheel, { passive: false });
+    return () => {
+      container.removeEventListener("wheel", handleWheel);
+    };
+  }, [mode]);
 
   useEffect(() => {
     setMotionPage(1);
@@ -360,7 +388,7 @@ export default function ControlPanel(props: Props) {
             <div className="asset-copy">
               <strong>{name}</strong>
               <span>
-                {kind === "motion" && motionLen[name] ? `${motionLen[name].toFixed(2)} 秒` : kind === "motion" ? "动作素材" : "表情素材"}
+                {kind === "motion" && motionLen[name] ? `${motionLen[name].toFixed(2)} 秒` : kind === "motion" ? "动作素材" : ""}
               </span>
             </div>
             <div className="asset-actions">
@@ -409,7 +437,7 @@ export default function ControlPanel(props: Props) {
         </div>
       ) : null}
 
-      <div className="workspace-pane-scroll">
+      <div ref={paneScrollRef} className="workspace-pane-scroll">
         {mode === "resources" ? (
           <>
             <PanelSection title="动作素材" meta={`${filteredMotions.length} 条`} className="workspace-section--library">
@@ -432,24 +460,23 @@ export default function ControlPanel(props: Props) {
                     </option>
                   ))}
                 </select>
+                <div className="library-duration-inline">
+                  <label className="field-label" htmlFor="motion-duration">
+                    时长
+                  </label>
+                  <input
+                    id="motion-duration"
+                    className="input"
+                    type="number"
+                    min={0.1}
+                    step={0.1}
+                    value={motionDur}
+                    onChange={(event) => setMotionDur(Math.max(0.1, Number(event.target.value) || 0.1))}
+                  />
+                </div>
               </div>
               <Pager page={safeMotionPage} pageCount={motionPageCount} onPageChange={setMotionPage} />
               {renderResourceList(motionSlice, currentMotion, chooseMotion, addMotionClip, "motion")}
-              <div className="field-inline">
-                <label className="field-label" htmlFor="motion-duration">
-                  默认片段时长
-                </label>
-                <input
-                  id="motion-duration"
-                  className="input"
-                  type="number"
-                  min={0.1}
-                  step={0.1}
-                  value={motionDur}
-                  onChange={(event) => setMotionDur(Math.max(0.1, Number(event.target.value) || 0.1))}
-                />
-                <span className="pane-note">秒</span>
-              </div>
             </PanelSection>
 
             <PanelSection title="表情素材" meta={`${filteredExpressions.length} 条`} className="workspace-section--library">
@@ -472,24 +499,23 @@ export default function ControlPanel(props: Props) {
                     </option>
                   ))}
                 </select>
+                <div className="library-duration-inline">
+                  <label className="field-label" htmlFor="expression-duration">
+                    时长
+                  </label>
+                  <input
+                    id="expression-duration"
+                    className="input"
+                    type="number"
+                    min={0.1}
+                    step={0.1}
+                    value={exprDur}
+                    onChange={(event) => setExprDur(Math.max(0.1, Number(event.target.value) || 0.1))}
+                  />
+                </div>
               </div>
               <Pager page={safeExpressionPage} pageCount={expressionPageCount} onPageChange={setExprPage} />
               {renderResourceList(expressionSlice, currentExpression, chooseExpression, addExprClip, "expression")}
-              <div className="field-inline">
-                <label className="field-label" htmlFor="expression-duration">
-                  默认片段时长
-                </label>
-                <input
-                  id="expression-duration"
-                  className="input"
-                  type="number"
-                  min={0.1}
-                  step={0.1}
-                  value={exprDur}
-                  onChange={(event) => setExprDur(Math.max(0.1, Number(event.target.value) || 0.1))}
-                />
-                <span className="pane-note">秒</span>
-              </div>
             </PanelSection>
 
           </>
