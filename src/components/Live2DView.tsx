@@ -102,6 +102,18 @@ export default function Live2DView() {
   const [characterOptions, setCharacterOptions] = useState<CharacterOption[]>([]);
   const [selectedCharacterId, setSelectedCharacterId] = useState<string>("main");
   const [characterTransform, setCharacterTransform] = useState<CharacterTransform>({ x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0 });
+  const characterTransformRef = useRef<CharacterTransform>({ x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0 });
+  const isDraggingRef = useRef(false);
+
+  const handleDraggingChange = (dragging: boolean) => {
+    isDraggingRef.current = dragging;
+    setIsDragging(dragging);
+  };
+
+  const syncCharacterTransformState = (transform: CharacterTransform) => {
+    characterTransformRef.current = transform;
+    setCharacterTransform(transform);
+  };
 
   
   // ???WebGAL?? ???//
@@ -118,7 +130,8 @@ export default function Live2DView() {
     setModelData,
     setCustomRecordingBounds,
     enableDragging,
-    setIsDragging
+    setIsDragging: handleDraggingChange,
+    onTransformChange: syncCharacterTransformState,
   });
 
   const audioManager = AudioManager({
@@ -201,12 +214,19 @@ export default function Live2DView() {
   const updateSelectedCharacterTransform = (patch: Partial<CharacterTransform>) => {
     const target = getTransformTarget();
     if (!target) return;
-    const next: CharacterTransform = { ...characterTransform, ...patch };
+    const next: CharacterTransform = { ...characterTransformRef.current, ...patch };
     (target as any).position?.set?.(next.x, next.y);
     if ((target as any).scale?.set) (target as any).scale.set(Math.max(0.01, next.scaleX), Math.max(0.01, next.scaleY));
     (target as any).rotation = (next.rotation * Math.PI) / 180;
-    setCharacterTransform(next);
+    syncCharacterTransformState(next);
     syncRecordingBoundsFromCurrentModel();
+  };
+
+  const updateUniformScale = (multiplier: number) => {
+    const current = characterTransformRef.current;
+    const uniformScale = Math.max(0.01, (current.scaleX + current.scaleY) / 2);
+    const nextScale = Math.max(0.01, Math.min(10, uniformScale * multiplier));
+    updateSelectedCharacterTransform({ scaleX: nextScale, scaleY: nextScale });
   };
 
 
@@ -956,8 +976,48 @@ export default function Live2DView() {
   }, [isPlaying]);
 
   useEffect(() => {
+    characterTransformRef.current = characterTransform;
+  }, [characterTransform]);
+
+  useEffect(() => {
     refreshCharacterEditor();
   }, [selectedModel, selectedCharacterId, isDragging]);
+
+  useEffect(() => {
+    const handleWheelTransform = (event: WheelEvent) => {
+      if (!enableDragging || !isDraggingRef.current) return;
+      if (!event.ctrlKey && !event.altKey) return;
+      if (
+        event.target instanceof HTMLInputElement ||
+        event.target instanceof HTMLTextAreaElement ||
+        event.target instanceof HTMLSelectElement
+      ) {
+        return;
+      }
+
+      if (event.ctrlKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        updateUniformScale(event.deltaY > 0 ? 0.96 : 1.04);
+        return;
+      }
+
+      if (event.altKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        const current = characterTransformRef.current;
+        updateSelectedCharacterTransform({ rotation: current.rotation + (event.deltaY > 0 ? 4 : -4) });
+      }
+    };
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    canvas.addEventListener("wheel", handleWheelTransform, { passive: false, capture: true });
+    return () => {
+      canvas.removeEventListener("wheel", handleWheelTransform, { capture: true } as EventListenerOptions);
+    };
+  }, [enableDragging, modelUrl]);
 
 
   // ?????????????????
