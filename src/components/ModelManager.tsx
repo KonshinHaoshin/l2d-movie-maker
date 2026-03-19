@@ -7,6 +7,13 @@ interface ModelData {
   motions: { [key: string]: Motion[] };
   expressions: Expression[];
 }
+type TransformSnapshot = {
+  x: number;
+  y: number;
+  scaleX: number;
+  scaleY: number;
+  rotation: number;
+};
 
 export interface JsonlRoleMeta {
   id: string;
@@ -31,6 +38,7 @@ interface ModelManagerProps {
   setCustomRecordingBounds: (bounds: { x: number; y: number; width: number; height: number }) => void;
   enableDragging: boolean;
   setIsDragging: (dragging: boolean) => void;
+  onTransformChange?: (transform: TransformSnapshot) => void;
 }
 
 export default function ModelManager({
@@ -42,7 +50,8 @@ export default function ModelManager({
   setModelData,
   setCustomRecordingBounds,
   enableDragging,
-  setIsDragging
+  setIsDragging,
+  onTransformChange
 }: ModelManagerProps) {
   
   // 工具函数
@@ -93,6 +102,27 @@ export default function ModelManager({
     }
   };
 
+  const emitTransformChange = (target: any) => {
+    onTransformChange?.({
+      x: Number(target?.position?.x ?? target?.x ?? 0),
+      y: Number(target?.position?.y ?? target?.y ?? 0),
+      scaleX: Number(target?.scale?.x ?? 1),
+      scaleY: Number(target?.scale?.y ?? 1),
+      rotation: Number((target?.rotation ?? 0) * 180 / Math.PI),
+    });
+  };
+
+  const updateBoundsFromDisplayObject = (target: any) => {
+    const bounds = target?.getBounds?.();
+    if (!bounds) return;
+    setCustomRecordingBounds({
+      x: Math.max(0, bounds.x),
+      y: Math.max(0, bounds.y),
+      width: Math.max(100, Math.min(bounds.width, appRef.current!.screen.width)),
+      height: Math.max(100, Math.min(bounds.height, appRef.current!.screen.height)),
+    });
+  };
+
   // 使模�?容器可拖�?
   const makeDraggableModel = (model: any) => {
     model.interactive = true;
@@ -103,27 +133,48 @@ export default function ModelManager({
       (model as any).dragging = true;
       (model as any)._pointerX = e.data.global.x - model.x;
       (model as any)._pointerY = e.data.global.y - model.y;
+      (model as any)._dragMode = "move";
+      const originalEvent = e.data.originalEvent as MouseEvent | PointerEvent | undefined;
+      if (originalEvent?.altKey) {
+        (model as any)._dragMode = "rotate";
+        (model as any)._startAngle = Math.atan2(e.data.global.y - model.y, e.data.global.x - model.x);
+        (model as any)._startRotation = model.rotation ?? 0;
+      }
     });
 
     model.on("pointermove", (e: any) => {
       if ((model as any).dragging) {
-        model.position.x = e.data.global.x - (model as any)._pointerX;
-        model.position.y = e.data.global.y - (model as any)._pointerY;
-        // 更新单模型包围盒
-        const mw = model.width * model.scale.x;
-        const mh = model.height * model.scale.y;
-        const mx = model.position.x - mw / 2;
-        const my = model.position.y - mh / 2;
-        setCustomRecordingBounds({
-          x: Math.max(0, mx),
-          y: Math.max(0, my),
-          width: Math.min(mw, appRef.current!.screen.width),
-          height: Math.min(mh, appRef.current!.screen.height),
-        });
+        const originalEvent = e.data.originalEvent as MouseEvent | PointerEvent | undefined;
+        const wantsRotate = !!originalEvent?.altKey;
+
+        if (wantsRotate) {
+          if ((model as any)._dragMode !== "rotate") {
+            (model as any)._dragMode = "rotate";
+            (model as any)._startAngle = Math.atan2(e.data.global.y - model.y, e.data.global.x - model.x);
+            (model as any)._startRotation = model.rotation ?? 0;
+          }
+          const currentAngle = Math.atan2(e.data.global.y - model.y, e.data.global.x - model.x);
+          model.rotation = (model as any)._startRotation + (currentAngle - (model as any)._startAngle);
+        } else {
+          if ((model as any)._dragMode !== "move") {
+            (model as any)._dragMode = "move";
+            (model as any)._pointerX = e.data.global.x - model.x;
+            (model as any)._pointerY = e.data.global.y - model.y;
+          }
+          model.position.x = e.data.global.x - (model as any)._pointerX;
+          model.position.y = e.data.global.y - (model as any)._pointerY;
+        }
+
+        updateBoundsFromDisplayObject(model);
+        emitTransformChange(model);
       }
     });
 
-    const up = () => { setIsDragging(false); (model as any).dragging = false; };
+    const up = () => {
+      setIsDragging(false);
+      (model as any).dragging = false;
+      (model as any)._dragMode = undefined;
+    };
     model.on("pointerup", up);
     model.on("pointerupoutside", up);
   };
@@ -153,20 +204,41 @@ export default function ModelManager({
       (container as any).dragging = true;
       (container as any)._pointerX = e.data.global.x - container.x;
       (container as any)._pointerY = e.data.global.y - container.y;
+      (container as any)._dragMode = "move";
+      const originalEvent = e.data.originalEvent as MouseEvent | PointerEvent | undefined;
+      if (originalEvent?.altKey) {
+        (container as any)._dragMode = "rotate";
+        (container as any)._startAngle = Math.atan2(e.data.global.y - container.y, e.data.global.x - container.x);
+        (container as any)._startRotation = container.rotation ?? 0;
+      }
     });
 
     container.on("pointermove", (e: any) => {
       if ((container as any).dragging) {
-        container.position.x = e.data.global.x - (container as any)._pointerX;
-        container.position.y = e.data.global.y - (container as any)._pointerY;
-        const b = container.getBounds();
-        setCustomRecordingBounds({
-          x: Math.max(0, b.x),
-          y: Math.max(0, b.y),
-          width: Math.min(b.width, appRef.current!.screen.width),
-          height: Math.min(b.height, appRef.current!.screen.height),
-        });
+        const originalEvent = e.data.originalEvent as MouseEvent | PointerEvent | undefined;
+        const wantsRotate = !!originalEvent?.altKey;
+
+        if (wantsRotate) {
+          if ((container as any)._dragMode !== "rotate") {
+            (container as any)._dragMode = "rotate";
+            (container as any)._startAngle = Math.atan2(e.data.global.y - container.y, e.data.global.x - container.x);
+            (container as any)._startRotation = container.rotation ?? 0;
+          }
+          const currentAngle = Math.atan2(e.data.global.y - container.y, e.data.global.x - container.x);
+          container.rotation = (container as any)._startRotation + (currentAngle - (container as any)._startAngle);
+        } else {
+          if ((container as any)._dragMode !== "move") {
+            (container as any)._dragMode = "move";
+            (container as any)._pointerX = e.data.global.x - container.x;
+            (container as any)._pointerY = e.data.global.y - container.y;
+          }
+          container.position.x = e.data.global.x - (container as any)._pointerX;
+          container.position.y = e.data.global.y - (container as any)._pointerY;
+        }
+
+        updateBoundsFromDisplayObject(container);
         redrawHit();
+        emitTransformChange(container);
       }
     });
 
@@ -175,6 +247,7 @@ export default function ModelManager({
       // @ts-ignore
       container.cursor = "grab";
       (container as any).dragging = false;
+      (container as any)._dragMode = undefined;
     };
     container.on("pointerup", up);
     container.on("pointerupoutside", up);

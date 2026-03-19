@@ -144,37 +144,6 @@
 
 .workspace-dock {
   min-width: 0;
-  transition: width 180ms ease, flex-basis 180ms ease, opacity 180ms ease;
-}
-
-.workspace-dock.is-collapsed {
-  width: 48px;
-}
-
-.workspace-dock.is-collapsed .workspace-pane {
-  display: none;
-}
-
-.dock-toggle {
-  width: 48px;
-  height: 100%;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  background: linear-gradient(180deg, rgba(28, 37, 48, 0.98), rgba(20, 27, 36, 0.94));
-  color: var(--text-soft);
-  writing-mode: vertical-rl;
-  text-orientation: mixed;
-  letter-spacing: 0.18em;
-  cursor: pointer;
-  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
-}
-
-.dock-toggle:hover,
-.dock-toggle:focus-visible {
-  color: var(--text);
-  border-color: var(--line-strong);
-  background: linear-gradient(180deg, rgba(38, 50, 64, 0.98), rgba(24, 32, 42, 0.96));
-  outline: none;
 }
 
 .workspace-pane {
@@ -709,10 +678,6 @@
 .download-button,
 .screenshot-button {
   background: rgba(26, 34, 45, 0.92);
-}
-
-.btn--icon {
-  min-width: 56px;
 }
 
 .input {
