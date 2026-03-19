@@ -178,10 +178,6 @@ export default function Timeline({
 
     return (
       <div className="tl-track-row">
-        <div className="tl-side-cell">
-          <strong>{config.label}</strong>
-          <span>{config.sublabel}</span>
-        </div>
         <div className="tl-lane" style={{ height: TRACK_H }}>
           <div className="tl-grid" style={{ width: totalPx }}>
             {Array.from({ length: Math.ceil(totalPx / pps) + 1 }).map((_, index) => (
