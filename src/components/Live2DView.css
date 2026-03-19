@@ -208,6 +208,16 @@
   gap: 12px;
 }
 
+.workspace-pane--resources .workspace-pane-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 10px;
+  gap: 10px;
+}
+
 .inspector-tabs {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -243,6 +253,23 @@
   overflow: hidden;
 }
 
+.workspace-pane--resources .workspace-section {
+  min-height: 0;
+}
+
+.workspace-section--library {
+  display: block;
+}
+
+.workspace-pane--resources .workspace-section-header {
+  padding: 12px 14px 8px;
+}
+
+.workspace-pane--resources .workspace-section-body {
+  padding: 0 14px 14px;
+  gap: 10px;
+}
+
 .workspace-section-header {
   display: flex;
   align-items: center;
@@ -269,6 +296,10 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.workspace-section--library .workspace-section-body {
+  overflow: visible;
 }
 
 .field-stack,
@@ -301,6 +332,39 @@
   flex-wrap: wrap;
 }
 
+.workspace-section--library .toolbar-row,
+.workspace-section--library .asset-pager {
+  flex-wrap: nowrap;
+}
+
+.workspace-section--library .toolbar-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px;
+  align-items: center;
+}
+
+.workspace-section--library .asset-pager {
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.workspace-section--library .asset-pager .btn {
+  flex: 0 0 auto;
+  min-width: 0;
+  padding-inline: 10px;
+}
+
+.workspace-section--library .asset-pager .pane-note {
+  flex: 0 0 auto;
+  min-width: 48px;
+  text-align: center;
+}
+
+.workspace-pane--resources .input,
+.workspace-pane--resources .btn {
+  min-height: 34px;
+}
+
 .button-row {
   justify-content: flex-start;
 }
@@ -309,6 +373,16 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  overflow: visible;
+  padding-right: 0;
+}
+
+.workspace-section--library .field-inline {
+  flex: 0 0 auto;
+}
+
+.workspace-pane--resources .asset-list {
+  gap: 6px;
 }
 
 .asset-item {
@@ -321,6 +395,13 @@
   border-radius: 12px;
   background: rgba(23, 31, 41, 0.82);
   transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+
+.workspace-pane--resources .asset-item {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
 }
 
 .asset-item:hover {
@@ -341,6 +422,12 @@
   gap: 4px;
 }
 
+.workspace-pane--resources .asset-copy {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
 .asset-copy strong,
 .meta-grid strong,
 .stat-card strong {
@@ -355,10 +442,29 @@
   white-space: nowrap;
 }
 
+.workspace-pane--resources .asset-copy strong {
+  font-size: 0.92rem;
+}
+
+.workspace-pane--resources .asset-copy span {
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+}
+
 .asset-actions {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.workspace-pane--resources .asset-actions {
+  gap: 6px;
+}
+
+.workspace-pane--resources .asset-actions .btn {
+  min-height: 30px;
+  padding-inline: 12px;
+  font-size: 0.8rem;
 }
 
 .pane-empty {
@@ -1016,6 +1122,32 @@
     grid-template-columns: 248px minmax(0, 1fr) 300px;
     gap: 10px;
     padding: 10px;
+  }
+
+  .workspace-pane--resources .workspace-pane-scroll {
+    display: flex;
+  }
+
+  .workspace-pane--resources .workspace-section-header {
+    padding: 10px 12px 8px;
+  }
+
+  .workspace-pane--resources .workspace-section-body {
+    padding: 0 12px 12px;
+    gap: 8px;
+  }
+
+  .workspace-section--library .asset-pager .btn {
+    padding-inline: 8px;
+    font-size: 0.8rem;
+  }
+
+  .workspace-pane--resources .asset-item {
+    padding: 7px 8px;
+  }
+
+  .workspace-pane--resources .asset-actions .btn {
+    padding-inline: 10px;
   }
 
   .timeline-shell {

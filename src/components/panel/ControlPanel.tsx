@@ -108,14 +108,16 @@ const inspectorTabs: Array<{ id: InspectorTab; label: string }> = [
 function PanelSection({
   title,
   meta,
+  className,
   children,
 }: {
   title: string;
   meta?: string;
+  className?: string;
   children: React.ReactNode;
 }) {
   return (
-    <section className="workspace-section">
+    <section className={`workspace-section${className ? ` ${className}` : ""}`}>
       <div className="workspace-section-header">
         <h3 className="workspace-section-title">{title}</h3>
         {meta ? <span className="workspace-section-meta">{meta}</span> : null}
@@ -162,9 +164,7 @@ export default function ControlPanel(props: Props) {
     onChangeInspectorTab,
     onCollapse,
     onToggleWebGALMode,
-    modelList,
     selectedModel,
-    onSelectModel,
     onRefreshModels,
     modelData,
     motionLen,
@@ -412,38 +412,7 @@ export default function ControlPanel(props: Props) {
       <div className="workspace-pane-scroll">
         {mode === "resources" ? (
           <>
-            <PanelSection title="项目" meta={`${modelList.length} 个模型`}>
-              <div className="field-stack">
-                <label className="field-label" htmlFor="resource-model-select">
-                  当前模型
-                </label>
-                <select
-                  id="resource-model-select"
-                  className="input input--full"
-                  value={selectedModel ?? ""}
-                  onChange={(event) => onSelectModel(event.target.value || null)}
-                >
-                  {modelList.length === 0 ? <option value="">model/ 下未发现模型</option> : null}
-                  {modelList.map((rel) => (
-                    <option key={rel} value={rel}>
-                      {rel}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="button-row">
-                {onRefreshModels ? (
-                  <button className="btn btn--quiet" onClick={onRefreshModels}>
-                    刷新模型
-                  </button>
-                ) : null}
-                <button className="btn btn--quiet" onClick={onToggleWebGALMode}>
-                  WebGAL 工具
-                </button>
-              </div>
-            </PanelSection>
-
-            <PanelSection title="动作素材" meta={`${filteredMotions.length} 条`}>
+            <PanelSection title="动作素材" meta={`${filteredMotions.length} 条`} className="workspace-section--library">
               <div className="toolbar-row">
                 <input
                   className="input input--full"
@@ -483,7 +452,7 @@ export default function ControlPanel(props: Props) {
               </div>
             </PanelSection>
 
-            <PanelSection title="表情素材" meta={`${filteredExpressions.length} 条`}>
+            <PanelSection title="表情素材" meta={`${filteredExpressions.length} 条`} className="workspace-section--library">
               <div className="toolbar-row">
                 <input
                   className="input input--full"
@@ -523,18 +492,6 @@ export default function ControlPanel(props: Props) {
               </div>
             </PanelSection>
 
-            <PanelSection title="音频素材">
-              <div className="pane-empty pane-empty--compact">
-                <strong>把音频导入工程</strong>
-                <span>导入后可驱动嘴型并加入底部时间线。</span>
-              </div>
-              <div className="button-row">
-                <button className="btn btn--accent" onClick={addAudioClip}>
-                  导入音频
-                </button>
-              </div>
-              {renderLevelMeter()}
-            </PanelSection>
           </>
         ) : (
           <>
