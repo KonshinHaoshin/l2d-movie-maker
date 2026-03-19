@@ -1,5 +1,5 @@
 // src/components/Live2DView.tsx
-import { useEffect, useRef, useState } from "react";
+import { startTransition, useEffect, useRef, useState } from "react";
 import * as PIXI from "pixi.js";
 import { Live2DModel } from "pixi-live2d-display";
 import Timeline from "./timeline/Timeline";
@@ -33,6 +33,7 @@ type MotionLenMap = Record<string, number>;
 type CharacterOption = { id: string; label: string };
 type CharacterTransform = { x: number; y: number; scaleX: number; scaleY: number; rotation: number };
 type ToolbarAction = "play" | "stop" | "record" | "record-stop";
+const PLAYHEAD_UI_INTERVAL_MS = 1000 / 30;
 
 
 export default function Live2DView() {
@@ -76,6 +77,10 @@ export default function Live2DView() {
   const fpsRafRef = useRef<number | null>(null);
   const fpsFrameCountRef = useRef(0);
   const fpsLastTsRef = useRef<number | null>(null);
+  const playheadRef = useRef(0);
+  const playheadUiLastTsRef = useRef<number | null>(null);
+  const activeMotionClipIdRef = useRef<string | null>(null);
+  const activeExprClipIdRef = useRef<string | null>(null);
 
   // ????????
   const [motionDur, setMotionDur] = useState(2);
@@ -233,11 +238,29 @@ export default function Live2DView() {
   // ????????
   const nextEnd = (clips: Clip[]) => clips.reduce((t, c) => Math.max(t, c.start + c.duration), 0);
 
+  const resetTimelineTriggerState = () => {
+    activeMotionClipIdRef.current = null;
+    activeExprClipIdRef.current = null;
+  };
+
+  const findActiveClip = (clips: Clip[], timeSec: number): Clip | null => {
+    for (let i = clips.length - 1; i >= 0; i -= 1) {
+      const clip = clips[i];
+      if (timeSec >= clip.start && timeSec < clip.start + clip.duration) {
+        return clip;
+      }
+    }
+    return null;
+  };
+
   const clearTimeline = () => { 
     setMotionClips([]); 
     setExprClips([]); 
     setAudioClips([]); 
+    playheadRef.current = 0;
+    playheadUiLastTsRef.current = null;
     setPlayhead(0); 
+    resetTimelineTriggerState();
     
     // ??????
     audioManager.cleanupAudio();
@@ -249,7 +272,12 @@ export default function Live2DView() {
     else if (track === "audio") setAudioClips(prev => prev.map(c => (c.id === id ? { ...c, ...patch } : c)));
   };
 
-  const setPlayheadSec = (sec: number) => setPlayhead(sec);
+  const setPlayheadSec = (sec: number) => {
+    playheadRef.current = sec;
+    playheadUiLastTsRef.current = null;
+    resetTimelineTriggerState();
+    setPlayhead(sec);
+  };
 
   // ????????????????????//
   const playMotion = (group: string) => {
@@ -345,18 +373,24 @@ export default function Live2DView() {
   const timelineLength = Math.max(nextEnd(motionClips), nextEnd(exprClips), nextEnd(audioClips));
 
   const applyTimelineAtTime = (t: number, offline: boolean = false) => {
-    // ??????????????????firedRef????
-    for (const c of motionClips) {
-      if (t >= c.start && t < c.start + c.duration) {
-        // ??????????????
-        playMotion(c.name);
+    const activeMotionClip = findActiveClip(motionClips, t);
+    if (activeMotionClip) {
+      if (activeMotionClipIdRef.current !== activeMotionClip.id) {
+        activeMotionClipIdRef.current = activeMotionClip.id;
+        playMotion(activeMotionClip.name);
       }
+    } else {
+      activeMotionClipIdRef.current = null;
     }
-    for (const c of exprClips) {
-      if (t >= c.start && t < c.start + c.duration) {
-        // ??????????????
-        applyExpression(c.name);
+
+    const activeExprClip = findActiveClip(exprClips, t);
+    if (activeExprClip) {
+      if (activeExprClipIdRef.current !== activeExprClip.id) {
+        activeExprClipIdRef.current = activeExprClip.id;
+        applyExpression(activeExprClip.name);
       }
+    } else {
+      activeExprClipIdRef.current = null;
     }
 
     if (!offline) {
@@ -366,14 +400,31 @@ export default function Live2DView() {
     }
   };
 
+  const syncPlayheadUi = (nextPlayhead: number, ts: number, force: boolean = false) => {
+    playheadRef.current = nextPlayhead;
+
+    if (!force) {
+      const lastUiTs = playheadUiLastTsRef.current;
+      if (lastUiTs != null && ts - lastUiTs < PLAYHEAD_UI_INTERVAL_MS) {
+        return;
+      }
+    }
+
+    playheadUiLastTsRef.current = ts;
+    startTransition(() => {
+      setPlayhead(nextPlayhead);
+    });
+  };
+
   const tick = (ts: number) => {
     if (startTsRef.current == null) startTsRef.current = ts;
     const t = (ts - startTsRef.current) / 1000;
-    setPlayhead(t);
+    syncPlayheadUi(t, ts);
 
     applyTimelineAtTime(t);
 
     if (t >= timelineLength) {
+      syncPlayheadUi(timelineLength, ts, true);
       stopPlayback();
       return;
     }
@@ -382,6 +433,9 @@ export default function Live2DView() {
 
   const startPlayback = () => {
     if (isPlaying || timelineLength <= 0) return;
+    playheadRef.current = 0;
+    playheadUiLastTsRef.current = null;
+    resetTimelineTriggerState();
     setPlayhead(0);
     setIsPlaying(true);
     startTsRef.current = null;
@@ -392,7 +446,10 @@ export default function Live2DView() {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
     startTsRef.current = null;
+    playheadUiLastTsRef.current = null;
+    resetTimelineTriggerState();
     setIsPlaying(false);
+    setPlayhead(playheadRef.current);
     
     // ?????????
     audioManager.stopAllAudio();
