@@ -34,6 +34,7 @@ type CharacterOption = { id: string; label: string };
 type CharacterTransform = { x: number; y: number; scaleX: number; scaleY: number; rotation: number };
 type ToolbarAction = "play" | "stop" | "record" | "record-stop";
 const PLAYHEAD_UI_INTERVAL_MS = 1000 / 30;
+const EXPORT_PROGRESS_UI_INTERVAL_MS = 100;
 
 
 export default function Live2DView() {
@@ -547,14 +548,27 @@ export default function Live2DView() {
     let prepInterval: number | null = null;
     let firstFrame = false;
     const prepStart = Date.now();
+    let offlineTickerTimeMs = performance.now();
+    let lastExportProgressUiTs = 0;
+
+    const updateOfflineExportUi = (timeSec: number, progressPct: number, force: boolean = false) => {
+      const now = performance.now();
+      if (!force && now - lastExportProgressUiTs < EXPORT_PROGRESS_UI_INTERVAL_MS) {
+        return;
+      }
+      lastExportProgressUiTs = now;
+      startTransition(() => {
+        setRecordingTime(timeSec);
+        setRecordingProgress(progressPct);
+      });
+    };
 
     try {
       prepInterval = window.setInterval(() => {
         if (firstFrame) return;
         const elapsed = (Date.now() - prepStart) / 1000;
         const pct = Math.min(0.05, elapsed * 0.2);
-        setRecordingProgress(pct * 100);
-        setRecordingTime(elapsed);
+        updateOfflineExportUi(elapsed, pct * 100);
       }, 100);
       const result = await runOfflineWebMExport({
         canvas: exportCanvas,
@@ -562,8 +576,9 @@ export default function Live2DView() {
         targetFrameCount: targetFrames,
         applyTimelineAtTime: (timeSec) => applyTimelineAtTime(timeSec, true),
         renderFrame: () => {
-          app.ticker.update(1000 / settings.fps);
-          app.renderer.render(app.stage);
+          offlineTickerTimeMs += 1000 / settings.fps;
+          // Application already binds render() to ticker, so one ticker update is enough.
+          app.ticker.update(offlineTickerTimeMs);
           if (exportCtx) {
             if (transparentBg) {
               exportCtx.clearRect(0, 0, exportCanvas.width, exportCanvas.height);
@@ -593,8 +608,11 @@ export default function Live2DView() {
             firstFrame = true;
             if (prepInterval) { clearInterval(prepInterval); prepInterval = null; }
           }
-          setRecordingTime(timeSec);
-          setRecordingProgress((frameIndex / totalFrames) * 100);
+          updateOfflineExportUi(
+            timeSec,
+            (frameIndex / totalFrames) * 100,
+            frameIndex >= totalFrames,
+          );
         }
       });
 
