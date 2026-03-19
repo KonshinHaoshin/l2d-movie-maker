@@ -17,6 +17,11 @@
   --track-blue: #6274d4;
   --track-green: #2d8f7d;
   --track-orange: #bc7a3b;
+  --scroll-track: rgba(16, 22, 30, 0.92);
+  --scroll-thumb: linear-gradient(180deg, rgba(79, 101, 129, 0.96), rgba(55, 72, 94, 0.98));
+  --scroll-thumb-hover: linear-gradient(180deg, rgba(105, 132, 166, 0.98), rgba(74, 96, 124, 1));
+  --scroll-thumb-active: linear-gradient(180deg, rgba(205, 132, 72, 0.98), rgba(148, 88, 45, 1));
+  --scroll-corner: rgba(13, 18, 24, 0.96);
   --shadow-lg: 0 22px 60px rgba(3, 8, 18, 0.35);
   --shadow-sm: 0 8px 20px rgba(5, 10, 18, 0.28);
   --radius-sm: 8px;
@@ -207,6 +212,58 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.workspace-pane-scroll,
+.tl-timearea,
+.asset-list {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(86, 110, 140, 0.96) var(--scroll-track);
+}
+
+.workspace-pane-scroll::-webkit-scrollbar,
+.tl-timearea::-webkit-scrollbar,
+.asset-list::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+.workspace-pane-scroll::-webkit-scrollbar-track,
+.tl-timearea::-webkit-scrollbar-track,
+.asset-list::-webkit-scrollbar-track {
+  background: var(--scroll-track);
+  border-left: 1px solid rgba(77, 95, 118, 0.18);
+  border-top: 1px solid rgba(77, 95, 118, 0.18);
+}
+
+.workspace-pane-scroll::-webkit-scrollbar-thumb,
+.tl-timearea::-webkit-scrollbar-thumb,
+.asset-list::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+  box-shadow:
+    inset 0 0 0 1px rgba(212, 223, 236, 0.08),
+    0 0 0 1px rgba(25, 32, 42, 0.36);
+}
+
+.workspace-pane-scroll::-webkit-scrollbar-thumb:hover,
+.tl-timearea::-webkit-scrollbar-thumb:hover,
+.asset-list::-webkit-scrollbar-thumb:hover {
+  background: var(--scroll-thumb-hover);
+}
+
+.workspace-pane-scroll::-webkit-scrollbar-thumb:active,
+.tl-timearea::-webkit-scrollbar-thumb:active,
+.asset-list::-webkit-scrollbar-thumb:active {
+  background: var(--scroll-thumb-active);
+}
+
+.workspace-pane-scroll::-webkit-scrollbar-corner,
+.tl-timearea::-webkit-scrollbar-corner,
+.asset-list::-webkit-scrollbar-corner {
+  background: var(--scroll-corner);
 }
 
 .workspace-pane--resources .workspace-pane-scroll {

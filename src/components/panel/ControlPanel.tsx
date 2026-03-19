@@ -36,7 +36,6 @@ type Props = {
   mode: ControlPanelMode;
   activeInspectorTab?: InspectorTab;
   onChangeInspectorTab?: (tab: InspectorTab) => void;
-  onCollapse?: () => void;
   onToggleWebGALMode: () => void;
 
   modelList: string[];
@@ -162,7 +161,6 @@ export default function ControlPanel(props: Props) {
     mode,
     activeInspectorTab = "character",
     onChangeInspectorTab,
-    onCollapse,
     onToggleWebGALMode,
     selectedModel,
     onRefreshModels,
@@ -414,11 +412,6 @@ export default function ControlPanel(props: Props) {
           <div className="workspace-pane-kicker">{mode === "resources" ? "素材面板" : "参数面板"}</div>
           <h2 className="workspace-pane-title">{paneTitle}</h2>
         </div>
-        {onCollapse ? (
-          <button className="btn btn--quiet btn--icon" onClick={onCollapse} aria-label={`收起${paneTitle}`}>
-            收起
-          </button>
-        ) : null}
       </div>
 
       {mode === "inspector" ? (

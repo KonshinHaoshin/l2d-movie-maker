@@ -107,8 +107,6 @@ export default function Live2DView() {
   // ???WebGAL?? ???//
   const [showWebGALMode, setShowWebGALMode] = useState(false);
   const [activeInspectorTab, setActiveInspectorTab] = useState<InspectorTab>("character");
-  const [isResourcePaneCollapsed, setIsResourcePaneCollapsed] = useState(false);
-  const [isInspectorPaneCollapsed, setIsInspectorPaneCollapsed] = useState(false);
 
   // ??????
   const modelManager = ModelManager({
@@ -1158,18 +1156,11 @@ export default function Live2DView() {
       </header>
 
       <div className="editor-workspace">
-        <aside className={`workspace-dock workspace-dock--left ${isResourcePaneCollapsed ? "is-collapsed" : ""}`}>
-          {isResourcePaneCollapsed ? (
-            <button className="dock-toggle" onClick={() => setIsResourcePaneCollapsed(false)}>
-              资源
-            </button>
-          ) : (
-            <ControlPanel
-              {...panelProps}
-              mode="resources"
-              onCollapse={() => setIsResourcePaneCollapsed(true)}
-            />
-          )}
+        <aside className="workspace-dock workspace-dock--left">
+          <ControlPanel
+            {...panelProps}
+            mode="resources"
+          />
         </aside>
 
         <main className="editor-main">
@@ -1215,20 +1206,13 @@ export default function Live2DView() {
           </section>
         </main>
 
-        <aside className={`workspace-dock workspace-dock--right ${isInspectorPaneCollapsed ? "is-collapsed" : ""}`}>
-          {isInspectorPaneCollapsed ? (
-            <button className="dock-toggle" onClick={() => setIsInspectorPaneCollapsed(false)}>
-              检查器
-            </button>
-          ) : (
-            <ControlPanel
-              {...panelProps}
-              mode="inspector"
-              activeInspectorTab={activeInspectorTab}
-              onChangeInspectorTab={setActiveInspectorTab}
-              onCollapse={() => setIsInspectorPaneCollapsed(true)}
-            />
-          )}
+        <aside className="workspace-dock workspace-dock--right">
+          <ControlPanel
+            {...panelProps}
+            mode="inspector"
+            activeInspectorTab={activeInspectorTab}
+            onChangeInspectorTab={setActiveInspectorTab}
+          />
         </aside>
       </div>
 
