@@ -1083,6 +1083,7 @@
   background: linear-gradient(180deg, rgba(223, 141, 73, 0.96), rgba(247, 202, 118, 0.9));
   z-index: 30;
   pointer-events: none;
+  will-change: transform;
 }
 
 .tl-empty {

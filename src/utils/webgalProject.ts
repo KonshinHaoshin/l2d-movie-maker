@@ -1,0 +1,546 @@
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { appLocalDataDir, dirname, join } from "@tauri-apps/api/path";
+import { open } from "@tauri-apps/plugin-dialog";
+import { exists, mkdir, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { parseMtn } from "./parseMtn";
+import { normalizePath } from "./fs";
+import type { WebGALCommand, WebGALDialogueCommand } from "./webgalScript";
+
+const WEBGAL_STORE_FILE = "webgal-role-mappings.json";
+const AUDIO_ROOT_CANDIDATES = ["vocal", "voice", "audio", "se"] as const;
+const AUDIO_EXT_RE = /\.(wav|mp3|ogg|m4a)$/i;
+
+export type WebGALRoleNameMap = Record<string, string>;
+
+export type WebGALProjectRecord = {
+  projectRoot: string;
+  lastAudioRoot?: string;
+  roleNameMap: WebGALRoleNameMap;
+  lastSelectedRoleId?: string;
+  updatedAt: string;
+};
+
+type WebGALStore = {
+  version: 1;
+  lastProjectRoot?: string;
+  projects: Record<string, WebGALProjectRecord>;
+};
+
+export type WebGALRoleSummary = {
+  roleId: string;
+  label: string;
+  changeFigureCount: number;
+  dialogueCount: number;
+  voiceCount: number;
+  figurePaths: string[];
+};
+
+export type WebGALPreviewGroup = {
+  index: number;
+  startSec: number;
+  durationSec: number;
+  lineNumber: number;
+  speaker?: string;
+  text?: string;
+  motion?: string;
+  expression?: string;
+  figurePath?: string;
+  audioRelativePath?: string;
+  audioAbsolutePath?: string;
+  audioDurationSec?: number;
+  skipReason?: string;
+};
+
+export type WebGALImportGroup = {
+  index: number;
+  lineNumber: number;
+  speaker?: string;
+  text?: string;
+  motion?: string;
+  expression?: string;
+  figurePath?: string;
+  audioRelativePath?: string;
+  audioAbsolutePath?: string;
+  audioDurationSec?: number;
+  durationHintSec: number;
+};
+
+export type WebGALImportPlan = {
+  projectRoot: string;
+  audioRoot?: string;
+  selectedRoleId: string;
+  selectedRoleLabel: string;
+  selectedFigurePath: string;
+  groups: WebGALImportGroup[];
+};
+
+type WebGALProjectValidation = {
+  project_root: string;
+  figure_root: string;
+  adjusted_from_game_dir: boolean;
+};
+
+async function externalPathExists(path: string): Promise<boolean> {
+  return invoke<boolean>("webgal_path_exists", { path });
+}
+
+async function externalReadTextFile(path: string): Promise<string> {
+  return invoke<string>("webgal_read_text_file", { path });
+}
+
+function createEmptyStore(): WebGALStore {
+  return {
+    version: 1,
+    projects: {},
+  };
+}
+
+async function getStoreFilePath(): Promise<string> {
+  const dir = await appLocalDataDir();
+  await mkdir(dir, { recursive: true });
+  return join(dir, WEBGAL_STORE_FILE);
+}
+
+async function readStore(): Promise<WebGALStore> {
+  const filePath = await getStoreFilePath();
+  if (!(await exists(filePath))) {
+    return createEmptyStore();
+  }
+
+  try {
+    const text = await readTextFile(filePath);
+    const parsed = JSON.parse(text) as Partial<WebGALStore>;
+    if (parsed.version !== 1 || !parsed.projects) {
+      return createEmptyStore();
+    }
+    return {
+      version: 1,
+      lastProjectRoot: parsed.lastProjectRoot,
+      projects: parsed.projects,
+    };
+  } catch {
+    return createEmptyStore();
+  }
+}
+
+async function writeStore(store: WebGALStore): Promise<void> {
+  const filePath = await getStoreFilePath();
+  await writeTextFile(filePath, JSON.stringify(store, null, 2));
+}
+
+function toStoreKey(projectRoot: string): string {
+  return normalizePath(projectRoot);
+}
+
+export async function loadLastWebGALProjectRecord(): Promise<WebGALProjectRecord | null> {
+  const store = await readStore();
+  if (!store.lastProjectRoot) return null;
+  return store.projects[toStoreKey(store.lastProjectRoot)] ?? null;
+}
+
+export async function loadWebGALProjectRecord(projectRoot: string): Promise<WebGALProjectRecord | null> {
+  const store = await readStore();
+  return store.projects[toStoreKey(projectRoot)] ?? null;
+}
+
+export async function saveWebGALProjectRecord(
+  projectRoot: string,
+  patch: Partial<Omit<WebGALProjectRecord, "projectRoot" | "updatedAt">>,
+  options: { setAsLastProject?: boolean } = {},
+): Promise<WebGALProjectRecord> {
+  const store = await readStore();
+  const key = toStoreKey(projectRoot);
+  const current = store.projects[key];
+  const next: WebGALProjectRecord = {
+    projectRoot: key,
+    lastAudioRoot: patch.lastAudioRoot ?? current?.lastAudioRoot,
+    roleNameMap: patch.roleNameMap ?? current?.roleNameMap ?? {},
+    lastSelectedRoleId: patch.lastSelectedRoleId ?? current?.lastSelectedRoleId,
+    updatedAt: new Date().toISOString(),
+  };
+  store.projects[key] = next;
+  if (options.setAsLastProject ?? true) {
+    store.lastProjectRoot = key;
+  }
+  await writeStore(store);
+  return next;
+}
+
+export async function selectWebGALProject(): Promise<string | null> {
+  const picked = await open({
+    directory: true,
+    multiple: false,
+    title: "选择 WebGAL 项目目录",
+  });
+
+  if (!picked) return null;
+  return normalizePath(Array.isArray(picked) ? picked[0] : picked);
+}
+
+export async function validateWebGALProject(projectRoot: string): Promise<{ projectRoot: string; figureRoot: string }> {
+  const validated = await invoke<WebGALProjectValidation>("validate_webgal_project_dir", {
+    path: projectRoot,
+  });
+
+  return {
+    projectRoot: normalizePath(validated.project_root),
+    figureRoot: normalizePath(validated.figure_root),
+  };
+}
+
+export function extractRoleNameMapFromCommands(commands: WebGALCommand[]): WebGALRoleNameMap {
+  const next: WebGALRoleNameMap = {};
+  for (const command of commands) {
+    if (command.type !== "dialogue") continue;
+    const { figureId, speaker } = command.data;
+    if (!figureId || !speaker) continue;
+    next[figureId] = speaker;
+  }
+  return next;
+}
+
+export function mergeRoleNameMaps(base: WebGALRoleNameMap, patch: WebGALRoleNameMap): WebGALRoleNameMap {
+  const merged: WebGALRoleNameMap = { ...base };
+  for (const [id, name] of Object.entries(patch)) {
+    const trimmedId = id.trim();
+    const trimmedName = name.trim();
+    if (!trimmedId || !trimmedName) continue;
+    merged[trimmedId] = trimmedName;
+  }
+  return merged;
+}
+
+export function summarizeWebGALRoles(commands: WebGALCommand[], roleNameMap: WebGALRoleNameMap): WebGALRoleSummary[] {
+  const summaryMap = new Map<string, WebGALRoleSummary & { figurePathSet: Set<string> }>();
+
+  const ensureSummary = (roleId: string): (WebGALRoleSummary & { figurePathSet: Set<string> }) => {
+    const existing = summaryMap.get(roleId);
+    if (existing) return existing;
+    const created = {
+      roleId,
+      label: roleNameMap[roleId] ?? roleId,
+      changeFigureCount: 0,
+      dialogueCount: 0,
+      voiceCount: 0,
+      figurePaths: [],
+      figurePathSet: new Set<string>(),
+    };
+    summaryMap.set(roleId, created);
+    return created;
+  };
+
+  for (const command of commands) {
+    if (command.type === "changeFigure" && command.data.id) {
+      const summary = ensureSummary(command.data.id);
+      summary.changeFigureCount += 1;
+      if (command.data.path) {
+        summary.figurePathSet.add(command.data.path);
+      }
+      summary.label = roleNameMap[command.data.id] ?? summary.label;
+      continue;
+    }
+
+    if (command.type === "dialogue" && command.data.figureId) {
+      const summary = ensureSummary(command.data.figureId);
+      summary.dialogueCount += 1;
+      if (command.data.audioPath) summary.voiceCount += 1;
+      summary.label = roleNameMap[command.data.figureId] ?? command.data.speaker ?? summary.label;
+    }
+  }
+
+  return Array.from(summaryMap.values())
+    .map((summary) => ({
+      roleId: summary.roleId,
+      label: summary.label,
+      changeFigureCount: summary.changeFigureCount,
+      dialogueCount: summary.dialogueCount,
+      voiceCount: summary.voiceCount,
+      figurePaths: Array.from(summary.figurePathSet),
+    }))
+    .sort((left, right) => left.roleId.localeCompare(right.roleId, "zh-CN"));
+}
+
+function isAbsolutePath(path: string): boolean {
+  return /^[a-z]:[\\/]/i.test(path) || path.startsWith("/");
+}
+
+function deriveProjectRootFromFigurePath(baseFigurePath: string): string | null {
+  const normalized = normalizePath(baseFigurePath);
+  const match = normalized.match(/^(.*?)[\\/]+game[\\/]+figure(?:[\\/]|$)/i);
+  return match?.[1] ? normalizePath(match[1]) : null;
+}
+
+export async function resolveFigureAbsolutePath(projectRoot: string, figurePath: string): Promise<string> {
+  const normalizedPath = normalizePath(figurePath);
+  if (isAbsolutePath(normalizedPath)) return normalizedPath;
+  const cleaned = normalizedPath
+    .replace(/^\.\/+/g, "")
+    .replace(/^game\/figure\//i, "")
+    .replace(/^figure\//i, "");
+  return normalizePath(await join(projectRoot, "game", "figure", cleaned));
+}
+
+export async function resolveAudioAbsolutePath(audioRoot: string | undefined, audioPath: string | undefined): Promise<string | undefined> {
+  if (!audioPath) return undefined;
+  const normalized = normalizePath(audioPath);
+  if (isAbsolutePath(normalized)) return normalized;
+  if (!audioRoot) return undefined;
+  return normalizePath(await join(audioRoot, normalized));
+}
+
+export async function detectWebGALAudioRoot(
+  projectRoot: string,
+  commands: WebGALCommand[],
+  lastAudioRoot?: string,
+): Promise<string | undefined> {
+  const firstAudioPath = commands.find(
+    (command): command is WebGALDialogueCommand => command.type === "dialogue" && !!command.data.audioPath,
+  )?.data.audioPath;
+
+  if (!firstAudioPath) {
+    if (lastAudioRoot && (await externalPathExists(lastAudioRoot))) {
+      return normalizePath(lastAudioRoot);
+    }
+    return undefined;
+  }
+
+  if (isAbsolutePath(firstAudioPath) && (await externalPathExists(firstAudioPath))) {
+    return normalizePath(await dirname(firstAudioPath));
+  }
+
+  if (lastAudioRoot) {
+    const candidate = await resolveAudioAbsolutePath(lastAudioRoot, firstAudioPath);
+    if (candidate && (await externalPathExists(candidate))) {
+      return normalizePath(lastAudioRoot);
+    }
+  }
+
+  for (const folderName of AUDIO_ROOT_CANDIDATES) {
+    const candidateRoot = normalizePath(await join(projectRoot, "game", folderName));
+    const candidatePath = await resolveAudioAbsolutePath(candidateRoot, firstAudioPath);
+    if (candidatePath && (await externalPathExists(candidatePath))) {
+      return candidateRoot;
+    }
+  }
+
+  return undefined;
+}
+
+export async function probeAudioDuration(audioAbsolutePath: string): Promise<number | undefined> {
+  if (!AUDIO_EXT_RE.test(audioAbsolutePath)) return undefined;
+  if (!(await externalPathExists(audioAbsolutePath))) return undefined;
+
+  const audioUrl = convertFileSrc(audioAbsolutePath);
+
+  return new Promise((resolve) => {
+    const audio = new Audio(audioUrl);
+    const cleanup = () => {
+      audio.onloadedmetadata = null;
+      audio.onerror = null;
+    };
+    audio.onloadedmetadata = () => {
+      const duration = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : undefined;
+      cleanup();
+      resolve(duration);
+    };
+    audio.onerror = () => {
+      cleanup();
+      resolve(undefined);
+    };
+    audio.load();
+  });
+}
+
+type BuildPreviewArgs = {
+  commands: WebGALCommand[];
+  selectedRoleId: string;
+  selectedFigurePath?: string;
+  audioRoot?: string;
+  motionDurationMap?: Record<string, number>;
+  defaultMotionDuration: number;
+  defaultExpressionDuration: number;
+};
+
+export async function buildWebGALPreviewGroups({
+  commands,
+  selectedRoleId,
+  selectedFigurePath,
+  audioRoot,
+  motionDurationMap = {},
+  defaultMotionDuration,
+  defaultExpressionDuration,
+}: BuildPreviewArgs): Promise<WebGALPreviewGroup[]> {
+  let currentMotion: string | undefined;
+  let currentExpression: string | undefined;
+  let currentFigurePath: string | undefined;
+  let currentStart = 0;
+  let groupIndex = 0;
+
+  const groups: WebGALPreviewGroup[] = [];
+
+  for (const command of commands) {
+    if (command.type === "changeFigure" && command.data.id === selectedRoleId) {
+      currentFigurePath = command.data.path ?? currentFigurePath;
+      currentMotion = command.data.motion ?? currentMotion;
+      currentExpression = command.data.expression ?? currentExpression;
+      continue;
+    }
+
+    if (command.type !== "dialogue" || command.data.figureId !== selectedRoleId) {
+      continue;
+    }
+
+    const audioAbsolutePath = await resolveAudioAbsolutePath(audioRoot, command.data.audioPath);
+    const audioDurationSec = audioAbsolutePath ? await probeAudioDuration(audioAbsolutePath) : undefined;
+    const fallbackDuration =
+      (currentMotion ? motionDurationMap[currentMotion] : undefined) ??
+      defaultMotionDuration ??
+      defaultExpressionDuration;
+
+    const skipReason =
+      currentFigurePath && selectedFigurePath && currentFigurePath !== selectedFigurePath
+        ? `当前立绘为 ${currentFigurePath}，不属于本次导入立绘`
+        : undefined;
+
+    const durationSec = audioDurationSec ?? fallbackDuration;
+
+    groups.push({
+      index: groupIndex,
+      startSec: currentStart,
+      durationSec,
+      lineNumber: command.lineNumber,
+      speaker: command.data.speaker,
+      text: command.data.text,
+      motion: currentMotion,
+      expression: currentExpression,
+      figurePath: currentFigurePath,
+      audioRelativePath: command.data.audioPath,
+      audioAbsolutePath,
+      audioDurationSec,
+      skipReason,
+    });
+
+    if (!skipReason) {
+      currentStart += durationSec;
+    }
+    groupIndex += 1;
+  }
+
+  return groups;
+}
+
+export function createWebGALImportPlan(args: {
+  projectRoot: string;
+  audioRoot?: string;
+  selectedRoleId: string;
+  selectedRoleLabel: string;
+  selectedFigurePath: string;
+  previewGroups: WebGALPreviewGroup[];
+}): WebGALImportPlan {
+  return {
+    projectRoot: args.projectRoot,
+    audioRoot: args.audioRoot,
+    selectedRoleId: args.selectedRoleId,
+    selectedRoleLabel: args.selectedRoleLabel,
+    selectedFigurePath: args.selectedFigurePath,
+    groups: args.previewGroups
+      .filter((group) => !group.skipReason)
+      .map((group) => ({
+        index: group.index,
+        lineNumber: group.lineNumber,
+        speaker: group.speaker,
+        text: group.text,
+        motion: group.motion,
+        expression: group.expression,
+        figurePath: group.figurePath,
+        audioRelativePath: group.audioRelativePath,
+        audioAbsolutePath: group.audioAbsolutePath,
+        audioDurationSec: group.audioDurationSec,
+        durationHintSec: group.durationSec,
+      })),
+  };
+}
+
+type MotionFileMap = Record<string, string>;
+
+async function resolveProjectRelativeAsset(baseFilePath: string, relativePath: string): Promise<string> {
+  const normalized = normalizePath(relativePath);
+  if (isAbsolutePath(normalized)) return normalized;
+
+  if (/^game\//i.test(normalized)) {
+    const projectRoot = deriveProjectRootFromFigurePath(baseFilePath);
+    if (projectRoot) {
+      return normalizePath(await join(projectRoot, normalized));
+    }
+  }
+
+  const baseDir = await dirname(baseFilePath);
+  return normalizePath(await join(baseDir, normalized.replace(/^\.\//, "")));
+}
+
+async function readMotionFileMapFromModel(modelAbsolutePath: string): Promise<MotionFileMap> {
+  if (/\.jsonl$/i.test(modelAbsolutePath)) {
+    const text = await externalReadTextFile(modelAbsolutePath);
+    const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const summary: { motions?: string[] } = {};
+    let firstPartPath: string | undefined;
+
+    for (const line of lines) {
+      try {
+        const parsed = JSON.parse(line) as { motions?: string[]; path?: string };
+        if (Array.isArray(parsed.motions)) {
+          summary.motions = parsed.motions;
+          continue;
+        }
+        if (!firstPartPath && parsed.path) {
+          firstPartPath = await resolveProjectRelativeAsset(modelAbsolutePath, parsed.path);
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    if (!firstPartPath) return {};
+    const firstModelText = await externalReadTextFile(firstPartPath);
+    const firstModelData = JSON.parse(firstModelText) as { motions?: Record<string, Array<{ file?: string }>> };
+    const sourceMotions = firstModelData.motions ?? {};
+    const groups = summary.motions?.length ? summary.motions : Object.keys(sourceMotions);
+
+    return Object.fromEntries(
+      groups
+        .map((group) => [group, sourceMotions[group]?.[0]?.file] as const)
+        .filter((entry): entry is [string, string] => typeof entry[1] === "string" && !!entry[1]),
+    );
+  }
+
+  const text = await externalReadTextFile(modelAbsolutePath);
+  const modelData = JSON.parse(text) as { motions?: Record<string, Array<{ file?: string }>> };
+  const sourceMotions = modelData.motions ?? {};
+
+  return Object.fromEntries(
+    Object.entries(sourceMotions)
+      .map(([group, entries]) => [group, entries?.[0]?.file] as const)
+      .filter((entry): entry is [string, string] => typeof entry[1] === "string" && !!entry[1]),
+  );
+}
+
+export async function loadWebGALMotionDurations(modelAbsolutePath: string): Promise<Record<string, number>> {
+  const fileMap = await readMotionFileMapFromModel(modelAbsolutePath);
+  const durations: Record<string, number> = {};
+
+  for (const [group, relativeFilePath] of Object.entries(fileMap)) {
+    if (!/\.mtn$/i.test(relativeFilePath)) continue;
+    try {
+      const absoluteMotionPath = await resolveProjectRelativeAsset(modelAbsolutePath, relativeFilePath);
+      const text = await externalReadTextFile(absoluteMotionPath);
+      const parsed = parseMtn(text);
+      if (parsed.durationMs > 0) {
+        durations[group] = parsed.durationMs / 1000;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return durations;
+}

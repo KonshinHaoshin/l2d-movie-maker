@@ -223,6 +223,7 @@ export default function ControlPanel(props: Props) {
   useEffect(() => {
     const container = paneScrollRef.current;
     if (!container) return;
+    const wheelListenerOptions: AddEventListenerOptions = { passive: false };
 
     const handleWheel = (event: WheelEvent) => {
       const canScroll = container.scrollHeight > container.clientHeight + 1;
@@ -241,9 +242,9 @@ export default function ControlPanel(props: Props) {
       event.stopPropagation();
     };
 
-    container.addEventListener("wheel", handleWheel, { passive: false });
+    container.addEventListener("wheel", handleWheel, wheelListenerOptions);
     return () => {
-      container.removeEventListener("wheel", handleWheel);
+      container.removeEventListener("wheel", handleWheel, wheelListenerOptions);
     };
   }, [mode]);
 

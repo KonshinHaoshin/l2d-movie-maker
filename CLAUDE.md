@@ -54,9 +54,33 @@ PIXI.js 6.5 (WebGL) + `pixi-live2d-display` renders Live2D models in a transpare
 2. Tauri FFmpeg commands transcode to ProRes 4444 (MOV) or flatten to MP4.
 3. Offline export path uses FFmpeg WASM for frame-by-frame PNG→WebM encoding.
 
+### State Management
+
+`Live2DView.tsx` is a monolithic orchestrator — all app state lives there via `useState`/`useRef`. Child components receive callbacks to update parent state. There is no Redux or Context. Cross-component coordination uses refs (e.g., `modelRef`, `appRef`, `groupContainerRef`).
+
+### Timeline Data Model
+
+Clips are typed in `src/components/timeline/types.ts`:
+
+```typescript
+type Clip = { id, name, start, duration, audioUrl?, audioPath?, audioBuffer? }
+type TrackKind = "motion" | "expr" | "audio"
+```
+
+Playback loop uses `applyTimelineAtTime(t)` (RAF-based) to apply the correct clip state at each frame.
+
+### Model Formats
+
+Two supported formats, both served via the Tauri local HTTP server:
+- `model.json` — standard Live2D format
+- `model.jsonl` — composite format (multiple characters in one file)
+
+Place models under `public/model/<character-name>/`.
+
 ### Key Config
 
 - Vite dev port: **1431** (strict, required by Tauri)
 - Tauri app ID: `com.DongshanRandeng.l2dmm`
 - Build targets: Chrome 105 (Windows), Safari 13 (macOS)
 - TypeScript strict mode, no unused locals/parameters
+- Window is **transparent** (required for alpha-channel recording) — do not change this
