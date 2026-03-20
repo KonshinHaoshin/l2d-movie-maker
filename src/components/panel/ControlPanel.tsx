@@ -62,6 +62,8 @@ type Props = {
   addExprClip: (name: string) => void;
   addAudioClip: () => void;
   subtitleClips: SubtitleClip[];
+  showSubtitles: boolean;
+  setShowSubtitles: (visible: boolean) => void;
   onAddSubtitleClip: () => void;
   onUpdateSubtitleClip: (
     id: string,
@@ -101,6 +103,9 @@ type Props = {
   onSaveWebM: () => void;
   onConvertToMov: () => void;
   onStartOfflineExport: () => void;
+  onStartSubtitleOnlyExport: () => void;
+  onStartLive2DOnlyExport: () => void;
+  onExportSubtitlesSrt: () => void;
   onTakeScreenshot: () => void;
   onTakePartsScreenshots: () => void;
   isVp9AlphaSupported: () => boolean;
@@ -201,6 +206,8 @@ export default function ControlPanel(props: Props) {
     addExprClip,
     addAudioClip,
     subtitleClips,
+    showSubtitles,
+    setShowSubtitles,
     onAddSubtitleClip,
     onUpdateSubtitleClip,
     onRemoveSubtitleClip,
@@ -233,6 +240,9 @@ export default function ControlPanel(props: Props) {
     onSaveWebM,
     onConvertToMov,
     onStartOfflineExport,
+    onStartSubtitleOnlyExport,
+    onStartLive2DOnlyExport,
+    onExportSubtitlesSrt,
     onTakeScreenshot,
     onTakePartsScreenshots,
     isVp9AlphaSupported,
@@ -354,6 +364,10 @@ export default function ControlPanel(props: Props) {
   const applySubtitleFontSizeToAll = (fontSize: number) => {
     const nextFontSize = Math.max(12, fontSize || 12);
     subtitleClips.forEach((clip) => onUpdateSubtitleClip(clip.id, { fontSize: nextFontSize }));
+  };
+
+  const blurOnWheel = (event: React.WheelEvent<HTMLInputElement>) => {
+    event.currentTarget.blur();
   };
 
   const [transformDraft, setTransformDraft] = useState({
@@ -640,6 +654,15 @@ export default function ControlPanel(props: Props) {
               <>
                 <PanelSection title="统一样式">
                   <div className="subtitle-global-grid">
+                    <label className="switch-row subtitle-switch-row">
+                      <input
+                        type="checkbox"
+                        checked={showSubtitles}
+                        onChange={(event) => setShowSubtitles(event.target.checked)}
+                      />
+                      <span>显示字幕</span>
+                    </label>
+
                     <label className="field-stack">
                       <span className="field-label">字体</span>
                       <select
@@ -664,6 +687,7 @@ export default function ControlPanel(props: Props) {
                         min={12}
                         step={1}
                         value={subtitleFontSize}
+                        onWheel={blurOnWheel}
                         onChange={(event) => applySubtitleFontSizeToAll(Number(event.target.value))}
                         disabled={subtitleClips.length === 0}
                       />
@@ -689,7 +713,7 @@ export default function ControlPanel(props: Props) {
                         <article key={clip.id} className="subtitle-card">
                           <div className="subtitle-card-header">
                             <strong>{clip.name || `字幕 ${index + 1}`}</strong>
-                            <button className="btn btn--quiet" onClick={() => onRemoveSubtitleClip(clip.id)}>
+                            <button className="btn btn--quiet subtitle-delete-btn" onClick={() => onRemoveSubtitleClip(clip.id)}>
                               删除
                             </button>
                           </div>
@@ -705,7 +729,7 @@ export default function ControlPanel(props: Props) {
                           </label>
 
                           <div className="subtitle-editor-grid">
-                            <label className="field-stack">
+                            <label className="field-stack subtitle-inline-field">
                               <span className="field-label">颜色</span>
                               <input
                                 className="input input--color"
@@ -714,7 +738,7 @@ export default function ControlPanel(props: Props) {
                                 onChange={(event) => onUpdateSubtitleClip(clip.id, { textColor: event.target.value })}
                               />
                             </label>
-                            <label className="field-stack">
+                            <label className="field-stack subtitle-inline-field">
                               <span className="field-label">开始</span>
                               <input
                                 className="input"
@@ -723,6 +747,7 @@ export default function ControlPanel(props: Props) {
                                 step={0.1}
                                 value={clip.start}
                                 disabled={Boolean(clip.linkedAudioClipId)}
+                                onWheel={blurOnWheel}
                                 onChange={(event) =>
                                   onUpdateSubtitleClip(clip.id, {
                                     start: Math.max(0, Number(event.target.value) || 0),
@@ -730,7 +755,7 @@ export default function ControlPanel(props: Props) {
                                 }
                               />
                             </label>
-                            <label className="field-stack">
+                            <label className="field-stack subtitle-inline-field">
                               <span className="field-label">时长</span>
                               <input
                                 className="input"
@@ -739,6 +764,7 @@ export default function ControlPanel(props: Props) {
                                 step={0.1}
                                 value={clip.duration}
                                 disabled={Boolean(clip.linkedAudioClipId)}
+                                onWheel={blurOnWheel}
                                 onChange={(event) =>
                                   onUpdateSubtitleClip(clip.id, {
                                     duration: Math.max(0.1, Number(event.target.value) || 0.1),
@@ -746,12 +772,6 @@ export default function ControlPanel(props: Props) {
                                 }
                               />
                             </label>
-                            {clip.linkedAudioClipId ? (
-                              <div className="field-stack subtitle-linked-note">
-                                <span className="field-label">对齐状态</span>
-                                <strong>跟随音频轨</strong>
-                              </div>
-                            ) : null}
                           </div>
                         </article>
                       ))}
@@ -778,6 +798,9 @@ export default function ControlPanel(props: Props) {
                     onSaveWebM={onSaveWebM}
                     onConvertToMov={onConvertToMov}
                     onStartOfflineExport={onStartOfflineExport}
+                    onStartSubtitleOnlyExport={onStartSubtitleOnlyExport}
+                    onStartLive2DOnlyExport={onStartLive2DOnlyExport}
+                    onExportSubtitlesSrt={onExportSubtitlesSrt}
                     onTakeScreenshot={onTakeScreenshot}
                     onTakePartsScreenshots={onTakePartsScreenshots}
                     isVp9AlphaSupported={isVp9AlphaSupported}

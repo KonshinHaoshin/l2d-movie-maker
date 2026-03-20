@@ -14,6 +14,9 @@ interface ExportToolbarProps {
   onSaveWebM: () => void;
   onConvertToMov: () => void;
   onStartOfflineExport: () => void;
+  onStartSubtitleOnlyExport: () => void;
+  onStartLive2DOnlyExport: () => void;
+  onExportSubtitlesSrt: () => void;
   onTakeScreenshot: () => void;
   onTakePartsScreenshots: () => void;
   isVp9AlphaSupported: () => boolean;

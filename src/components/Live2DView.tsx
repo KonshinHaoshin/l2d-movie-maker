@@ -45,6 +45,7 @@ type RendererWithBackground = PIXI.Renderer & {
   clearBeforeRender: boolean;
   gl?: WebGLRenderingContext | WebGL2RenderingContext | null;
 };
+type ExportVisualMode = "all" | "subtitle-only" | "live2d-only";
 const PLAYHEAD_UI_INTERVAL_MS = 1000 / 30;
 const EXPORT_PROGRESS_UI_INTERVAL_MS = 100;
 const DEFAULT_SUBTITLE_FONT_FAMILY = "Microsoft YaHei";
@@ -92,6 +93,7 @@ export default function Live2DView() {
   const [exprClips, setExprClips] = useState<Clip[]>([]);
   const [audioClips, setAudioClips] = useState<Clip[]>([]); // ??????
   const [subtitleClips, setSubtitleClips] = useState<SubtitleClip[]>([]);
+  const [showSubtitles, setShowSubtitles] = useState(true);
   const [playhead, setPlayhead] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentAudioLevel, setCurrentAudioLevel] = useState(0); // ??????
@@ -107,6 +109,7 @@ export default function Live2DView() {
   const activeMotionClipIdRef = useRef<string | null>(null);
   const activeExprClipIdRef = useRef<string | null>(null);
   const activeSubtitleSignatureRef = useRef<string>("");
+  const subtitleVisibilityOverrideRef = useRef<boolean | null>(null);
 
   // ????????
   const [motionDur, setMotionDur] = useState(2);
@@ -121,6 +124,7 @@ export default function Live2DView() {
   const [recordingProgress, setRecordingProgress] = useState(0);
   const [transparentBg, setTransparentBg] = useState(true);
   const [blob, setBlob] = useState<Blob | null>(null);
+  const [blobDefaultName, setBlobDefaultName] = useState("export.webm");
   
   // ????????????????//
   const [customRecordingBounds, setCustomRecordingBounds] = useState({ x: 0, y: 0, width: 800, height: 600 });
@@ -309,11 +313,65 @@ export default function Live2DView() {
     subtitleText.style.wordWrapWidth = Math.max(320, app.screen.width - 140);
   };
 
+  const shouldRenderSubtitles = () => subtitleVisibilityOverrideRef.current ?? showSubtitles;
+
+  const setModelVisibility = (visible: boolean) => {
+    const currentModel = modelRef.current;
+    if (!currentModel) return;
+
+    if (Array.isArray(currentModel)) {
+      if (groupContainerRef.current) {
+        groupContainerRef.current.visible = visible;
+        return;
+      }
+
+      currentModel.forEach((model) => {
+        (model as unknown as PIXI.DisplayObject).visible = visible;
+      });
+      return;
+    }
+
+    (currentModel as unknown as PIXI.DisplayObject).visible = visible;
+  };
+
+  const getModelVisibilitySnapshot = (): boolean[] => {
+    const currentModel = modelRef.current;
+    if (!currentModel) return [];
+
+    if (Array.isArray(currentModel)) {
+      if (groupContainerRef.current) {
+        return [groupContainerRef.current.visible];
+      }
+      return currentModel.map((model) => (model as unknown as PIXI.DisplayObject).visible);
+    }
+
+    return [(currentModel as unknown as PIXI.DisplayObject).visible];
+  };
+
+  const restoreModelVisibility = (snapshot: boolean[]) => {
+    const currentModel = modelRef.current;
+    if (!currentModel || snapshot.length === 0) return;
+
+    if (Array.isArray(currentModel)) {
+      if (groupContainerRef.current) {
+        groupContainerRef.current.visible = snapshot[0];
+        return;
+      }
+
+      currentModel.forEach((model, index) => {
+        (model as unknown as PIXI.DisplayObject).visible = snapshot[index] ?? true;
+      });
+      return;
+    }
+
+    (currentModel as unknown as PIXI.DisplayObject).visible = snapshot[0];
+  };
+
   const renderSubtitleClip = (clip: SubtitleClip | null) => {
     const subtitleText = subtitleTextRef.current;
     if (!subtitleText) return;
 
-    if (!clip || !clip.subtitleText.trim()) {
+    if (!shouldRenderSubtitles() || !clip || !clip.subtitleText.trim()) {
       subtitleText.visible = false;
       subtitleText.text = "";
       activeSubtitleSignatureRef.current = "";
@@ -668,6 +726,7 @@ export default function Live2DView() {
 
   // ??????
   const startRecording = () => {
+    setBlobDefaultName("export.webm");
     recordingManager.start();
   };
 
@@ -675,9 +734,51 @@ export default function Live2DView() {
     recordingManager.stop();
   };
 
-  const startOfflineExport = async () => {
+  const formatSrtTimestamp = (timeSec: number) => {
+    const totalMs = Math.max(0, Math.round(timeSec * 1000));
+    const hours = Math.floor(totalMs / 3_600_000);
+    const minutes = Math.floor((totalMs % 3_600_000) / 60_000);
+    const seconds = Math.floor((totalMs % 60_000) / 1000);
+    const millis = totalMs % 1000;
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")},${String(millis).padStart(3, "0")}`;
+  };
+
+  const exportSubtitlesSrt = async () => {
+    const entries = [...subtitleClips]
+      .filter((clip) => clip.subtitleText.trim())
+      .sort((left, right) => left.start - right.start);
+
+    if (entries.length === 0) {
+      alert("当前没有可导出的字幕");
+      return;
+    }
+
+    const out = await save({
+      defaultPath: "subtitles.srt",
+      filters: [{ name: "SRT", extensions: ["srt"] }],
+    });
+    if (!out) return;
+
+    const content = entries
+      .map((clip, index) => [
+        String(index + 1),
+        `${formatSrtTimestamp(clip.start)} --> ${formatSrtTimestamp(clip.start + clip.duration)}`,
+        clip.subtitleText.trim(),
+        "",
+      ].join("\n"))
+      .join("\n");
+
+    await writeFile(out, new TextEncoder().encode(content));
+  };
+
+  const startOfflineExport = async (mode: ExportVisualMode = "all") => {
     if (!canvasRef.current || !appRef.current) return;
     if (recState === "rec" || recState === "offline") return;
+
+    if (mode === "subtitle-only" && subtitleClips.length === 0) {
+      alert("当前没有可导出的字幕轨内容");
+      return;
+    }
 
     const totalDuration = Math.max(
       motionClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
@@ -729,6 +830,23 @@ export default function Live2DView() {
     const prepStart = Date.now();
     let offlineTickerTimeMs = performance.now();
     let lastExportProgressUiTs = 0;
+    const previousModelVisibility = getModelVisibilitySnapshot();
+    const previousSubtitleOverride = subtitleVisibilityOverrideRef.current;
+
+    if (mode === "subtitle-only") {
+      setModelVisibility(false);
+      subtitleVisibilityOverrideRef.current = true;
+      setBlobDefaultName("subtitles-only.webm");
+    } else if (mode === "live2d-only") {
+      setModelVisibility(true);
+      subtitleVisibilityOverrideRef.current = false;
+      setBlobDefaultName("live2d-only.webm");
+    } else {
+      setModelVisibility(true);
+      subtitleVisibilityOverrideRef.current = null;
+      setBlobDefaultName("export.webm");
+    }
+    renderSubtitleClip(findActiveClip(subtitleClips, playheadRef.current) as SubtitleClip | null);
 
     const updateOfflineExportUi = (timeSec: number, progressPct: number, force: boolean = false) => {
       const now = performance.now();
@@ -806,6 +924,9 @@ export default function Live2DView() {
       setRecordingTime(0);
       setRecordingProgress(0);
     } finally {
+      restoreModelVisibility(previousModelVisibility);
+      subtitleVisibilityOverrideRef.current = previousSubtitleOverride;
+      renderSubtitleClip(findActiveClip(subtitleClips, playheadRef.current) as SubtitleClip | null);
       if (prepInterval) { clearInterval(prepInterval); prepInterval = null; }
       if (wasTickerStarted) app.ticker.start();
     }
@@ -817,6 +938,7 @@ export default function Live2DView() {
     motionClips,
     exprClips,
     audioClips,
+    subtitleClips,
     recordingQuality,
     customRecordingBounds,
     useModelFrame,
@@ -829,8 +951,13 @@ export default function Live2DView() {
   });
 
   const saveWebM = async () => {
-    if (!recordingManager.recRef.current || !blob) return;
-    await recordingManager.recRef.current.saveWebM(blob);
+    if (!blob) return;
+    const out = await save({
+      defaultPath: blobDefaultName,
+      filters: [{ name: "WebM", extensions: ["webm"] }],
+    });
+    if (!out) return;
+    await writeFile(out, new Uint8Array(await blob.arrayBuffer()));
   };
 
   const toMov = async () => {
@@ -1183,7 +1310,7 @@ export default function Live2DView() {
   useEffect(() => {
     if (isPlaying) return;
     renderSubtitleClip(findActiveClip(subtitleClips, playhead) as SubtitleClip | null);
-  }, [subtitleClips, playhead, isPlaying]);
+  }, [subtitleClips, playhead, isPlaying, showSubtitles]);
 
   // ??????????
   useEffect(() => {
@@ -1349,6 +1476,8 @@ export default function Live2DView() {
     addExprClip,
     addAudioClip,
     subtitleClips,
+    showSubtitles,
+    setShowSubtitles,
     onAddSubtitleClip: addSubtitleClip,
     onUpdateSubtitleClip: updateSubtitleClip,
     onRemoveSubtitleClip: removeSubtitleClip,
@@ -1380,7 +1509,10 @@ export default function Live2DView() {
     onStopRecording: stopRecording,
     onSaveWebM: saveWebM,
     onConvertToMov: toMov,
-    onStartOfflineExport: startOfflineExport,
+    onStartOfflineExport: () => void startOfflineExport("all"),
+    onStartSubtitleOnlyExport: () => void startOfflineExport("subtitle-only"),
+    onStartLive2DOnlyExport: () => void startOfflineExport("live2d-only"),
+    onExportSubtitlesSrt: exportSubtitlesSrt,
     onTakeScreenshot: () => recordingManager.takeScreenshot(),
     onTakePartsScreenshots: () => recordingManager.takePartsScreenshots(),
     isVp9AlphaSupported,
