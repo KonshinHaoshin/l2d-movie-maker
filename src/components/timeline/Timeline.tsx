@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Clip, TrackKind } from "./types";
+import type { Clip, SubtitleClip, TrackKind } from "./clipTypes";
 
 type Props = {
   motionClips: Clip[];
   exprClips: Clip[];
   audioClips: Clip[];
+  subtitleClips: SubtitleClip[];
   playheadSec: number;
+  playheadSourceRef?: { current: number };
   pixelsPerSec?: number;
   onChangePixelsPerSec?: (pps: number) => void;
   onChangeClip: (track: TrackKind, id: string, patch: Partial<Pick<Clip, "start" | "duration">>) => void;
@@ -19,10 +21,10 @@ type Props = {
 const MIN_CLIP_SEC = 0.1;
 const GRID_STEP_SEC = 0.1;
 const DEFAULT_PPS = 80;
-const TRACK_H = 56;
-const CLIP_H = 40;
+const TRACK_H = 62;
+const CLIP_H = 42;
 const HANDLE_W = 8;
-const RULER_H = 30;
+const RULER_H = 34;
 
 type DragKind =
   | { mode: "move"; track: TrackKind; id: string; start0: number; mouseX0: number }
@@ -30,11 +32,20 @@ type DragKind =
   | { mode: "playhead"; mouseX0: number; playhead0: number }
   | null;
 
+const trackConfig: Record<TrackKind, { label: string; sublabel: string; color: string }> = {
+  motion: { label: "动作轨", sublabel: "Motion", color: "#6b7aff" },
+  expr: { label: "表情轨", sublabel: "Expression", color: "#2fa38d" },
+  audio: { label: "音频轨", sublabel: "Audio", color: "#d7863f" },
+  subtitle: { label: "字幕轨", sublabel: "Subtitle", color: "#c96a6a" },
+};
+
 export default function Timeline({
   motionClips,
   exprClips,
   audioClips,
+  subtitleClips,
   playheadSec,
+  playheadSourceRef,
   pixelsPerSec,
   onChangePixelsPerSec,
   onChangeClip,
@@ -44,32 +55,35 @@ export default function Timeline({
   onStopPlayback,
   isPlaying,
 }: Props) {
-  void onStopPlayback;
-
   const [internalPps, setInternalPps] = useState(pixelsPerSec ?? DEFAULT_PPS);
   useEffect(() => {
     if (typeof pixelsPerSec === "number") setInternalPps(pixelsPerSec);
   }, [pixelsPerSec]);
 
   const pps = typeof pixelsPerSec === "number" ? pixelsPerSec : internalPps;
-  const setPps = (v: number) => {
-    const next = Math.max(10, Math.min(800, Math.round(v)));
+  const setPps = (value: number) => {
+    const next = Math.max(10, Math.min(800, Math.round(value)));
     onChangePixelsPerSec ? onChangePixelsPerSec(next) : setInternalPps(next);
   };
 
   const lengthSec = useMemo(
     () =>
       Math.max(
-        motionClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
-        exprClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
-        audioClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
+        motionClips.reduce((time, clip) => Math.max(time, clip.start + clip.duration), 0),
+        exprClips.reduce((time, clip) => Math.max(time, clip.start + clip.duration), 0),
+        audioClips.reduce((time, clip) => Math.max(time, clip.start + clip.duration), 0),
+        subtitleClips.reduce((time, clip) => Math.max(time, clip.start + clip.duration), 0),
         0,
       ),
-    [motionClips, exprClips, audioClips],
+    [motionClips, exprClips, audioClips, subtitleClips],
   );
 
+  const hasClips = motionClips.length > 0 || exprClips.length > 0 || audioClips.length > 0 || subtitleClips.length > 0;
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const timeAreaRef = useRef<HTMLDivElement | null>(null);
+  const playheadLineRef = useRef<HTMLDivElement | null>(null);
+  const playheadValueRef = useRef<HTMLSpanElement | null>(null);
+  const visualPlayheadSecRef = useRef(playheadSec);
   const [drag, setDrag] = useState<DragKind>(null);
 
   const getTimelineX = (clientX: number) => {
@@ -82,20 +96,22 @@ export default function Timeline({
   useEffect(() => {
     const timeArea = timeAreaRef.current;
     if (!timeArea) return;
-    const onWheel = (e: WheelEvent) => {
-      if (!e.altKey) return;
-      e.preventDefault();
-      const factor = e.deltaY > 0 ? 0.9 : 1.1;
+    const wheelListenerOptions: AddEventListenerOptions = { passive: false };
+
+    const onWheel = (event: WheelEvent) => {
+      if (!event.altKey) return;
+      event.preventDefault();
+      const factor = event.deltaY > 0 ? 0.9 : 1.1;
       setPps(pps * factor);
     };
-    timeArea.addEventListener("wheel", onWheel, { passive: false });
-    return () => timeArea.removeEventListener("wheel", onWheel);
+    timeArea.addEventListener("wheel", onWheel, wheelListenerOptions);
+    return () => timeArea.removeEventListener("wheel", onWheel, wheelListenerOptions);
   }, [pps]);
 
   useEffect(() => {
-    const onMove = (e: MouseEvent) => {
+    const onMove = (event: MouseEvent) => {
       if (!drag) return;
-      const x = getTimelineX(e.clientX);
+      const x = getTimelineX(event.clientX);
 
       if (drag.mode === "move") {
         const dx = (x - drag.mouseX0) / pps;
@@ -135,7 +151,40 @@ export default function Timeline({
     };
   }, [drag, onChangeClip, onSetPlayhead, pps]);
 
-  const totalPx = Math.max(pps * Math.max(1, lengthSec), 600);
+  const totalPx = Math.max(pps * Math.max(1, lengthSec), 960);
+
+  const syncPlayheadVisual = (sec: number) => {
+    const nextSec = Math.max(0, sec);
+    visualPlayheadSecRef.current = nextSec;
+
+    if (playheadLineRef.current) {
+      playheadLineRef.current.style.transform = `translateX(${nextSec * pps}px)`;
+    }
+
+    if (playheadValueRef.current) {
+      playheadValueRef.current.textContent = formatPrecise(nextSec);
+    }
+  };
+
+  useEffect(() => {
+    syncPlayheadVisual(playheadSec);
+  }, [playheadSec, pps]);
+
+  useEffect(() => {
+    if (!isPlaying) {
+      syncPlayheadVisual(playheadSourceRef?.current ?? playheadSec);
+      return;
+    }
+
+    let rafId = 0;
+    const tickVisual = () => {
+      syncPlayheadVisual(playheadSourceRef?.current ?? playheadSec);
+      rafId = requestAnimationFrame(tickVisual);
+    };
+
+    rafId = requestAnimationFrame(tickVisual);
+    return () => cancelAnimationFrame(rafId);
+  }, [isPlaying, playheadSec, playheadSourceRef, pps]);
 
   const Ruler = () => {
     const secCount = Math.ceil(totalPx / pps);
@@ -143,24 +192,23 @@ export default function Timeline({
     return (
       <div
         className="tl-ruler"
-        title="Double-click to start playback"
-        onMouseDown={(e) => {
-          const x = getTimelineX(e.clientX);
-          setDrag({ mode: "playhead", mouseX0: x, playhead0: playheadSec });
+        title="拖动设置播放头，双击开始播放"
+        onMouseDown={(event) => {
+          const x = getTimelineX(event.clientX);
+          setDrag({ mode: "playhead", mouseX0: x, playhead0: playheadSourceRef?.current ?? playheadSec });
           onSetPlayhead?.(snap(Math.max(0, x / pps)));
         }}
-        onDoubleClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
+        onDoubleClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
           if (onStartPlayback && !isPlaying) onStartPlayback();
         }}
-        style={{ cursor: "pointer" }}
       >
-      <div className="tl-ruler-inner" style={{ width: totalPx, height: RULER_H }}>
-          {Array.from({ length: secCount + 1 }).map((_, i) => (
-            <div key={i} className="tl-tick" style={{ left: i * pps }}>
+        <div className="tl-ruler-inner" style={{ width: totalPx, height: RULER_H }}>
+          {Array.from({ length: secCount + 1 }).map((_, index) => (
+            <div key={index} className="tl-tick" style={{ left: index * pps }}>
               <div className="tl-tick-major" />
-              {i % majorEvery === 0 && <div className="tl-tick-label">{formatSec(i)}</div>}
+              {index % majorEvery === 0 ? <div className="tl-tick-label">{formatSec(index)}</div> : null}
               <div className="tl-tick-sub" style={{ left: pps * 0.5 }} />
             </div>
           ))}
@@ -169,128 +217,198 @@ export default function Timeline({
     );
   };
 
-  const Track = ({ clips, color, track }: { clips: Clip[]; color: string; track: TrackKind }) => (
-    <div className="tl-track-row">
-      <div className="tl-lane" style={{ height: TRACK_H }}>
-        <div className="tl-grid" style={{ width: totalPx }}>
-          {Array.from({ length: Math.ceil(totalPx / pps) + 1 }).map((_, i) => (
-            <div key={i} className="tl-grid-line" style={{ left: i * pps }} />
-          ))}
-        </div>
+  const Track = ({ clips, track }: { clips: Clip[]; track: TrackKind }) => {
+    const config = trackConfig[track];
 
-        <div className="tl-clips" style={{ width: totalPx, height: TRACK_H }}>
-          {clips.map((c) => {
-            const left = c.start * pps;
-            const width = Math.max(pps * c.duration, 28);
-            return (
-              <div
-                key={c.id}
-                className={`tl-clip ${track === "audio" ? "tl-clip--audio" : ""}`}
-                title={`${c.name} ${c.duration.toFixed(2)}s`}
-                style={{
-                  left,
-                  width,
-                  height: CLIP_H,
-                  top: (TRACK_H - CLIP_H) / 2,
-                  background: color,
-                  cursor: "pointer",
-                  position: "absolute",
-                  overflow: "hidden",
-                  zIndex: 10,
-                }}
-                onMouseDown={(e) => {
-                  const el = e.target as HTMLElement;
-                  if (el.classList.contains("tl-handle")) return;
-                  const x = getTimelineX(e.clientX);
-                  setDrag({ mode: "move", track, id: c.id, start0: c.start, mouseX0: x });
-                }}
-                onDoubleClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  if (onStartPlayback && !isPlaying) onStartPlayback();
-                }}
-              >
+    return (
+      <div className="tl-track-row">
+        <div className="tl-lane" style={{ height: TRACK_H }}>
+          <div className="tl-grid" style={{ width: totalPx }}>
+            {Array.from({ length: Math.ceil(totalPx / pps) + 1 }).map((_, index) => (
+              <div key={index} className="tl-grid-line" style={{ left: index * pps }} />
+            ))}
+          </div>
+
+          <div className="tl-clips" style={{ width: totalPx, height: TRACK_H }}>
+            {clips.map((clip) => {
+              const left = clip.start * pps;
+              const width = Math.max(pps * clip.duration, 28);
+              return (
                 <div
-                  className="tl-handle tl-handle--l"
-                  style={{ width: HANDLE_W }}
-                  onMouseDown={(e) => {
-                    e.stopPropagation();
-                    const x = getTimelineX(e.clientX);
-                    setDrag({ mode: "resize-l", track, id: c.id, start0: c.start, duration0: c.duration, mouseX0: x });
+                  key={clip.id}
+                  className={`tl-clip ${track === "audio" ? "tl-clip--audio" : ""}`}
+                  title={`${clip.name} ${clip.duration.toFixed(2)}s`}
+                  style={{
+                    left,
+                    width,
+                    height: CLIP_H,
+                    top: (TRACK_H - CLIP_H) / 2,
+                    background: config.color,
                   }}
-                />
-
-                <div className="tl-clip-name">{c.name}</div>
-                <div className="tl-clip-dur">{c.duration.toFixed(2)}s</div>
-
-                <div
-                  className="tl-clip-remove"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    onRemoveClip(track, c.id);
+                  onMouseDown={(event) => {
+                    const element = event.target as HTMLElement;
+                    if (element.classList.contains("tl-handle")) return;
+                    const x = getTimelineX(event.clientX);
+                    setDrag({ mode: "move", track, id: clip.id, start0: clip.start, mouseX0: x });
                   }}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
+                  onDoubleClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (onStartPlayback && !isPlaying) onStartPlayback();
                   }}
                 >
-                  x
-                </div>
+                  <div
+                    className="tl-handle tl-handle--l"
+                    style={{ width: HANDLE_W }}
+                    onMouseDown={(event) => {
+                      event.stopPropagation();
+                      const x = getTimelineX(event.clientX);
+                      setDrag({
+                        mode: "resize-l",
+                        track,
+                        id: clip.id,
+                        start0: clip.start,
+                        duration0: clip.duration,
+                        mouseX0: x,
+                      });
+                    }}
+                  />
 
-                <div
-                  className="tl-handle tl-handle--r"
-                  style={{ width: HANDLE_W }}
-                  onMouseDown={(e) => {
-                    e.stopPropagation();
-                    const x = getTimelineX(e.clientX);
-                    setDrag({ mode: "resize-r", track, id: c.id, start0: c.start, duration0: c.duration, mouseX0: x });
-                  }}
-                />
-              </div>
-            );
-          })}
+                  <div className="tl-clip-copy">
+                    <div className="tl-clip-name">{clip.name}</div>
+                    <div className="tl-clip-dur">{clip.duration.toFixed(2)} 秒</div>
+                  </div>
+
+                  <button
+                    className="tl-clip-remove"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onRemoveClip(track, clip.id);
+                    }}
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                    }}
+                    aria-label={`删除${config.label}片段`}
+                  >
+                    ×
+                  </button>
+
+                  <div
+                    className="tl-handle tl-handle--r"
+                    style={{ width: HANDLE_W }}
+                    onMouseDown={(event) => {
+                      event.stopPropagation();
+                      const x = getTimelineX(event.clientX);
+                      setDrag({
+                        mode: "resize-r",
+                        track,
+                        id: clip.id,
+                        start0: clip.start,
+                        duration0: clip.duration,
+                        mouseX0: x,
+                      });
+                    }}
+                  />
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
-    </div>
-  );
-
-  const Toolbar = () => (
-    <div className="tl-toolbar">
-      <button className="btn" onClick={() => setPps(pps * 0.8)}>Zoom Out</button>
-      <div className="tl-zoom">{Math.round(pps)} px/s</div>
-      <button className="btn" onClick={() => setPps(pps * 1.25)}>Zoom In</button>
-      <button
-        className="btn"
-        onClick={() => {
-          const targetPx = 1200;
-          const sec = Math.max(1, lengthSec || 1);
-          setPps(Math.max(10, Math.min(800, targetPx / sec)));
-        }}
-        disabled={lengthSec <= 0}
-      >
-        Fit
-      </button>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="tl-root" ref={wrapRef}>
-      <Toolbar />
+      <div className="tl-header">
+        <div className="tl-header-copy">
+          <div className="tl-kicker">时间线</div>
+          <h3 className="tl-title">剪辑编排</h3>
+          <p className="tl-description">拖拽片段调整起止，按住 Alt 滚轮缩放时间线，空格键控制播放。</p>
+        </div>
+        <div className="tl-toolbar">
+          <button
+            className={`btn ${isPlaying ? "btn--accent" : "btn--primary"}`}
+            onClick={() => (isPlaying ? onStopPlayback?.() : onStartPlayback?.())}
+            disabled={!hasClips && !isPlaying}
+          >
+            {isPlaying ? "停止播放" : "开始播放"}
+          </button>
+          <button className="btn btn--quiet" onClick={() => onSetPlayhead?.(0)}>
+            回到开头
+          </button>
+          <div className="tl-toolbar-meta">
+            <span>
+              播放头 <span ref={playheadValueRef}>{formatPrecise(playheadSec)}</span>
+            </span>
+            <span>总长 {formatPrecise(lengthSec)}</span>
+          </div>
+          <div className="tl-zoom-group">
+            <button className="btn btn--quiet" onClick={() => setPps(pps * 0.8)}>
+              缩小
+            </button>
+            <div className="tl-zoom">{Math.round(pps)} px/s</div>
+            <button className="btn btn--quiet" onClick={() => setPps(pps * 1.25)}>
+              放大
+            </button>
+            <button
+              className="btn btn--quiet"
+              onClick={() => {
+                const targetPx = 1400;
+                const sec = Math.max(1, lengthSec || 1);
+                setPps(Math.max(10, Math.min(800, targetPx / sec)));
+              }}
+              disabled={!hasClips}
+            >
+              适配全长
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div className="tl-layout">
         <div className="tl-side">
-          <div className="tl-side-cell tl-side-cell--ruler">Time</div>
-          <div className="tl-side-cell">Motion</div>
-          <div className="tl-side-cell">Expression</div>
-          <div className="tl-side-cell">Audio</div>
+          <div className="tl-side-cell tl-side-cell--ruler">
+            <strong>时间尺</strong>
+            <span>Time</span>
+          </div>
+          <div className="tl-side-cell">
+            <strong>{trackConfig.motion.label}</strong>
+            <span>{trackConfig.motion.sublabel}</span>
+          </div>
+          <div className="tl-side-cell">
+            <strong>{trackConfig.expr.label}</strong>
+            <span>{trackConfig.expr.sublabel}</span>
+          </div>
+          <div className="tl-side-cell">
+            <strong>{trackConfig.audio.label}</strong>
+            <span>{trackConfig.audio.sublabel}</span>
+          </div>
+          <div className="tl-side-cell">
+            <strong>{trackConfig.subtitle.label}</strong>
+            <span>{trackConfig.subtitle.sublabel}</span>
+          </div>
         </div>
+
         <div className="tl-timearea" ref={timeAreaRef}>
           <div className="tl-timecontent">
             <Ruler />
-            <Track clips={motionClips} color="#7c4dff" track="motion" />
-            <Track clips={exprClips} color="#26a69a" track="expr" />
-            <Track clips={audioClips} color="#ff6b35" track="audio" />
-            <div className="tl-playhead-global" style={{ left: playheadSec * pps }} />
+            {hasClips ? (
+              <>
+                <Track clips={motionClips} track="motion" />
+                <Track clips={exprClips} track="expr" />
+                <Track clips={audioClips} track="audio" />
+                <Track clips={subtitleClips} track="subtitle" />
+                <div ref={playheadLineRef} className="tl-playhead-global" style={{ left: 0, transform: `translateX(${playheadSec * pps}px)` }} />
+              </>
+            ) : (
+              <div className="tl-empty">
+                <strong>时间线还是空的</strong>
+                <span>从左侧资源区把动作、表情或音频加入轨道，开始搭建镜头节奏。</span>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -302,8 +420,12 @@ function snap(sec: number) {
   return Math.max(0, Math.round(sec / GRID_STEP_SEC) * GRID_STEP_SEC);
 }
 
-function formatSec(s: number) {
-  return `${s.toFixed(0)}s`;
+function formatSec(sec: number) {
+  return `${sec.toFixed(0)}s`;
+}
+
+function formatPrecise(sec: number) {
+  return `${sec.toFixed(2)} 秒`;
 }
 
 function niceMajorStep(pps: number) {

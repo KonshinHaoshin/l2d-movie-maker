@@ -1,26 +1,31 @@
 // src/components/Live2DView.tsx
-import { useEffect, useRef, useState } from "react";
+import { startTransition, useEffect, useRef, useState } from "react";
 import * as PIXI from "pixi.js";
 import { Live2DModel } from "pixi-live2d-display";
 import Timeline from "./timeline/Timeline";
-import type { Clip, TrackKind } from "./timeline/types";
+import type { Clip, SubtitleClip, TrackKind } from "./timeline/clipTypes";
 import { parseMtn } from "../utils/parseMtn";
 import "./Live2DView.css";
-import ControlPanel from "./panel/ControlPanel";
-import ExportToolbar from "./ExportToolbar";
+import ControlPanel, { type InspectorTab } from "./panel/ControlPanel";
 import ModelManager from "./ModelManager";
+import type { JsonlLive2DModel } from "./ModelManager";
 import AudioManager from "./AudioManager";
 import RecordingManager from "./RecordingManager";
 import WebGALMode from "./WebGALMode";
 // import { convertFileSrc } from "@tauri-apps/api/core";
 // import { normalizePath } from "../utils/fs";
-import { WebGALParser } from "../utils/webgalParser";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import { appCacheDir, BaseDirectory, join } from "@tauri-apps/api/path";
 import { writeFile } from "@tauri-apps/plugin-fs";
 import { isVp9AlphaSupported } from "../utils/recorder";
 import { runOfflineWebMExport } from "../utils/offlineExporter";
+import {
+  buildWebGALExternalAssetUrl,
+  loadWebGALMotionDurations,
+  resolveFigureAbsolutePath,
+  type WebGALImportPlan,
+} from "../utils/webgalProject";
 
 interface Motion { name: string; file: string; }
 interface Expression { name: string; file: string; }
@@ -32,6 +37,26 @@ interface ModelData {
 type MotionLenMap = Record<string, number>;
 type CharacterOption = { id: string; label: string };
 type CharacterTransform = { x: number; y: number; scaleX: number; scaleY: number; rotation: number };
+type TransformTarget = Pick<PIXI.Container, "position" | "scale" | "rotation" | "getBounds">;
+type BoundsTarget = Pick<Live2DModel, "width" | "height" | "position" | "scale" | "getBounds" | "getLocalBounds">;
+type RendererWithBackground = PIXI.Renderer & {
+  backgroundColor: number;
+  backgroundAlpha: number;
+  clearBeforeRender: boolean;
+  gl?: WebGLRenderingContext | WebGL2RenderingContext | null;
+};
+type ExportVisualMode = "all" | "subtitle-only" | "live2d-only";
+const PLAYHEAD_UI_INTERVAL_MS = 1000 / 30;
+const EXPORT_PROGRESS_UI_INTERVAL_MS = 100;
+const DEFAULT_SUBTITLE_FONT_FAMILY = "Microsoft YaHei";
+const DEFAULT_SUBTITLE_FONT_SIZE = 34;
+const DEFAULT_SUBTITLE_TEXT_COLOR = "#ffffff";
+
+declare global {
+  interface Window {
+    PIXI?: typeof PIXI;
+  }
+}
 
 
 export default function Live2DView() {
@@ -40,6 +65,7 @@ export default function Live2DView() {
   // ????????????????
   const modelRef = useRef<Live2DModel | Live2DModel[] | null>(null);
   const appRef = useRef<PIXI.Application | null>(null);
+  const subtitleTextRef = useRef<PIXI.Text | null>(null);
 
   // ????jsonl?????????MTN ??????
   const groupContainerRef = useRef<PIXI.Container | null>(null);
@@ -52,13 +78,13 @@ export default function Live2DView() {
   // ??????? ???//
   const [modelList, setModelList] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState<string | null>(null); // ?? "anon/model.json" ??"xxx/model.jsonl"
+  const [externalModelDisplayName, setExternalModelDisplayName] = useState<string | null>(null);
   const modelUrl = selectedModel && assetBase ? `${assetBase}/${selectedModel}` : null; // ???URL
 
   // ????????? ???//
   const [modelData, setModelData] = useState<ModelData | null>(null);
   const [currentMotion, setCurrentMotion] = useState<string>("");
   const [currentExpression, setCurrentExpression] = useState<string>("default");
-  const [showControls, setShowControls] = useState<boolean>(true);
   const [enableDragging, setEnableDragging] = useState<boolean>(true);
   const [isDragging, setIsDragging] = useState<boolean>(false);
 
@@ -66,6 +92,8 @@ export default function Live2DView() {
   const [motionClips, setMotionClips] = useState<Clip[]>([]);
   const [exprClips, setExprClips] = useState<Clip[]>([]);
   const [audioClips, setAudioClips] = useState<Clip[]>([]); // ??????
+  const [subtitleClips, setSubtitleClips] = useState<SubtitleClip[]>([]);
+  const [showSubtitles, setShowSubtitles] = useState(true);
   const [playhead, setPlayhead] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentAudioLevel, setCurrentAudioLevel] = useState(0); // ??????
@@ -76,6 +104,12 @@ export default function Live2DView() {
   const fpsRafRef = useRef<number | null>(null);
   const fpsFrameCountRef = useRef(0);
   const fpsLastTsRef = useRef<number | null>(null);
+  const playheadRef = useRef(0);
+  const playheadUiLastTsRef = useRef<number | null>(null);
+  const activeMotionClipIdRef = useRef<string | null>(null);
+  const activeExprClipIdRef = useRef<string | null>(null);
+  const activeSubtitleSignatureRef = useRef<string>("");
+  const subtitleVisibilityOverrideRef = useRef<boolean | null>(null);
 
   // ????????
   const [motionDur, setMotionDur] = useState(2);
@@ -90,6 +124,7 @@ export default function Live2DView() {
   const [recordingProgress, setRecordingProgress] = useState(0);
   const [transparentBg, setTransparentBg] = useState(true);
   const [blob, setBlob] = useState<Blob | null>(null);
+  const [blobDefaultName, setBlobDefaultName] = useState("export.webm");
   
   // ????????????????//
   const [customRecordingBounds, setCustomRecordingBounds] = useState({ x: 0, y: 0, width: 800, height: 600 });
@@ -102,10 +137,23 @@ export default function Live2DView() {
   const [characterOptions, setCharacterOptions] = useState<CharacterOption[]>([]);
   const [selectedCharacterId, setSelectedCharacterId] = useState<string>("main");
   const [characterTransform, setCharacterTransform] = useState<CharacterTransform>({ x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0 });
+  const characterTransformRef = useRef<CharacterTransform>({ x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0 });
+  const isDraggingRef = useRef(false);
+
+  const handleDraggingChange = (dragging: boolean) => {
+    isDraggingRef.current = dragging;
+    setIsDragging(dragging);
+  };
+
+  const syncCharacterTransformState = (transform: CharacterTransform) => {
+    characterTransformRef.current = transform;
+    setCharacterTransform(transform);
+  };
 
   
   // ???WebGAL?? ???//
   const [showWebGALMode, setShowWebGALMode] = useState(false);
+  const [activeInspectorTab, setActiveInspectorTab] = useState<InspectorTab>("character");
 
   // ??????
   const modelManager = ModelManager({
@@ -117,7 +165,8 @@ export default function Live2DView() {
     setModelData,
     setCustomRecordingBounds,
     enableDragging,
-    setIsDragging
+    setIsDragging: handleDraggingChange,
+    onTransformChange: syncCharacterTransformState,
   });
 
   const audioManager = AudioManager({
@@ -126,11 +175,19 @@ export default function Live2DView() {
     setCurrentAudioLevel
   });
 
-  const getTransformTarget = (): (PIXI.Container | Live2DModel) | null => {
+  const readTransformFromTarget = (target: TransformTarget): CharacterTransform => ({
+    x: Number(target.position.x),
+    y: Number(target.position.y),
+    scaleX: Number(target.scale.x),
+    scaleY: Number(target.scale.y),
+    rotation: Number(target.rotation * 180 / Math.PI),
+  });
+
+  const getTransformTarget = (): TransformTarget | null => {
     const cur = modelRef.current;
     if (!cur) return null;
     if (Array.isArray(cur)) return groupContainerRef.current ?? null;
-    return cur as Live2DModel;
+    return cur;
   };
 
   const syncRecordingBoundsFromCurrentModel = () => {
@@ -142,7 +199,7 @@ export default function Live2DView() {
       return;
     }
     if (modelRef.current) {
-      const b = (modelRef.current as any).getBounds?.();
+      const b = modelRef.current.getBounds();
       if (b && b.width > 0 && b.height > 0) {
         setCustomRecordingBounds({ x: Math.max(0, b.x), y: Math.max(0, b.y), width: Math.max(100, b.width), height: Math.max(100, b.height) });
       }
@@ -159,51 +216,213 @@ export default function Live2DView() {
     }
 
     if (Array.isArray(cur)) {
-      setCharacterOptions([{ id: "group", label: "Group" }]);
-      if (selectedCharacterId !== "group") setSelectedCharacterId("group");
+      const options = Array.from(
+        new Map(
+          cur.map((model, index) => {
+            const taggedModel = model as JsonlLive2DModel;
+            const id = taggedModel.__characterId || `part${index}`;
+            const label = taggedModel.__characterLabel || id;
+            return [id, { id, label }];
+          })
+        ).values()
+      );
+
+      setCharacterOptions(options);
+      setSelectedCharacterId((prev) => (
+        options.some((option) => option.id === prev) ? prev : (options[0]?.id ?? "main")
+      ));
       const target = groupContainerRef.current;
       if (!target) return;
-      setCharacterTransform({
-        x: Number((target as any).position?.x ?? 0),
-        y: Number((target as any).position?.y ?? 0),
-        scaleX: Number((target as any).scale?.x ?? 1),
-        scaleY: Number((target as any).scale?.y ?? 1),
-        rotation: Number(((target as any).rotation ?? 0) * 180 / Math.PI),
-      });
+      setCharacterTransform(readTransformFromTarget(target));
       return;
     }
 
-    setCharacterOptions([{ id: "main", label: "Main Model" }]);
+    setCharacterOptions([{ id: "main", label: "主角色" }]);
     if (selectedCharacterId !== "main") setSelectedCharacterId("main");
-    setCharacterTransform({
-      x: Number((cur as any).position?.x ?? 0),
-      y: Number((cur as any).position?.y ?? 0),
-      scaleX: Number((cur as any).scale?.x ?? 1),
-      scaleY: Number((cur as any).scale?.y ?? 1),
-      rotation: Number(((cur as any).rotation ?? 0) * 180 / Math.PI),
-    });
+    setCharacterTransform(readTransformFromTarget(cur));
   };
 
   const updateSelectedCharacterTransform = (patch: Partial<CharacterTransform>) => {
     const target = getTransformTarget();
     if (!target) return;
-    const next: CharacterTransform = { ...characterTransform, ...patch };
-    (target as any).position?.set?.(next.x, next.y);
-    if ((target as any).scale?.set) (target as any).scale.set(Math.max(0.01, next.scaleX), Math.max(0.01, next.scaleY));
-    (target as any).rotation = (next.rotation * Math.PI) / 180;
-    setCharacterTransform(next);
+    const next: CharacterTransform = { ...characterTransformRef.current, ...patch };
+    target.position.set(next.x, next.y);
+    target.scale.set(Math.max(0.01, next.scaleX), Math.max(0.01, next.scaleY));
+    target.rotation = (next.rotation * Math.PI) / 180;
+    syncCharacterTransformState(next);
     syncRecordingBoundsFromCurrentModel();
+  };
+
+  const updateUniformScale = (multiplier: number) => {
+    const current = characterTransformRef.current;
+    const uniformScale = Math.max(0.01, (current.scaleX + current.scaleY) / 2);
+    const nextScale = Math.max(0.01, Math.min(10, uniformScale * multiplier));
+    updateSelectedCharacterTransform({ scaleX: nextScale, scaleY: nextScale });
   };
 
 
   // ????????
   const nextEnd = (clips: Clip[]) => clips.reduce((t, c) => Math.max(t, c.start + c.duration), 0);
 
+  const buildSubtitleClipName = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return "新字幕";
+    return trimmed.length > 18 ? `${trimmed.slice(0, 18)}...` : trimmed;
+  };
+
+  const createSubtitleClip = (
+    text: string,
+    start: number,
+    duration: number,
+    options: { linkedAudioClipId?: string } = {},
+  ): SubtitleClip => ({
+    id: crypto.randomUUID(),
+    name: buildSubtitleClipName(text),
+    start,
+    duration,
+    subtitleText: text,
+    fontFamily: DEFAULT_SUBTITLE_FONT_FAMILY,
+    fontSize: DEFAULT_SUBTITLE_FONT_SIZE,
+    textColor: DEFAULT_SUBTITLE_TEXT_COLOR,
+    linkedAudioClipId: options.linkedAudioClipId,
+  });
+
+  const resetTimelineTriggerState = () => {
+    activeMotionClipIdRef.current = null;
+    activeExprClipIdRef.current = null;
+    activeSubtitleSignatureRef.current = "";
+  };
+
+  const findActiveClip = (clips: Clip[], timeSec: number): Clip | null => {
+    for (let i = clips.length - 1; i >= 0; i -= 1) {
+      const clip = clips[i];
+      if (timeSec >= clip.start && timeSec < clip.start + clip.duration) {
+        return clip;
+      }
+    }
+    return null;
+  };
+
+  const syncSubtitleDisplayLayout = () => {
+    const app = appRef.current;
+    const subtitleText = subtitleTextRef.current;
+    if (!app || !subtitleText) return;
+
+    subtitleText.position.set(app.screen.width / 2, app.screen.height - 36);
+    subtitleText.style.wordWrap = true;
+    subtitleText.style.wordWrapWidth = Math.max(320, app.screen.width - 140);
+  };
+
+  const shouldRenderSubtitles = () => subtitleVisibilityOverrideRef.current ?? showSubtitles;
+
+  const setModelVisibility = (visible: boolean) => {
+    const currentModel = modelRef.current;
+    if (!currentModel) return;
+
+    if (Array.isArray(currentModel)) {
+      if (groupContainerRef.current) {
+        groupContainerRef.current.visible = visible;
+        return;
+      }
+
+      currentModel.forEach((model) => {
+        (model as unknown as PIXI.DisplayObject).visible = visible;
+      });
+      return;
+    }
+
+    (currentModel as unknown as PIXI.DisplayObject).visible = visible;
+  };
+
+  const getModelVisibilitySnapshot = (): boolean[] => {
+    const currentModel = modelRef.current;
+    if (!currentModel) return [];
+
+    if (Array.isArray(currentModel)) {
+      if (groupContainerRef.current) {
+        return [groupContainerRef.current.visible];
+      }
+      return currentModel.map((model) => (model as unknown as PIXI.DisplayObject).visible);
+    }
+
+    return [(currentModel as unknown as PIXI.DisplayObject).visible];
+  };
+
+  const restoreModelVisibility = (snapshot: boolean[]) => {
+    const currentModel = modelRef.current;
+    if (!currentModel || snapshot.length === 0) return;
+
+    if (Array.isArray(currentModel)) {
+      if (groupContainerRef.current) {
+        groupContainerRef.current.visible = snapshot[0];
+        return;
+      }
+
+      currentModel.forEach((model, index) => {
+        (model as unknown as PIXI.DisplayObject).visible = snapshot[index] ?? true;
+      });
+      return;
+    }
+
+    (currentModel as unknown as PIXI.DisplayObject).visible = snapshot[0];
+  };
+
+  const renderSubtitleClip = (clip: SubtitleClip | null) => {
+    const subtitleText = subtitleTextRef.current;
+    if (!subtitleText) return;
+
+    if (!shouldRenderSubtitles() || !clip || !clip.subtitleText.trim()) {
+      subtitleText.visible = false;
+      subtitleText.text = "";
+      activeSubtitleSignatureRef.current = "";
+      return;
+    }
+
+    const signature = [
+      clip.id,
+      clip.subtitleText,
+      clip.fontFamily,
+      clip.fontSize,
+      clip.textColor,
+    ].join("|");
+
+    if (activeSubtitleSignatureRef.current === signature && subtitleText.visible) {
+      return;
+    }
+
+    subtitleText.visible = true;
+    subtitleText.text = clip.subtitleText;
+    subtitleText.style = new PIXI.TextStyle({
+      fontFamily: clip.fontFamily || DEFAULT_SUBTITLE_FONT_FAMILY,
+      fontSize: Math.max(12, clip.fontSize || DEFAULT_SUBTITLE_FONT_SIZE),
+      fontWeight: "700",
+      fill: clip.textColor || DEFAULT_SUBTITLE_TEXT_COLOR,
+      align: "center",
+      stroke: "#081018",
+      strokeThickness: 6,
+      lineJoin: "round",
+      dropShadow: true,
+      dropShadowColor: "#000000",
+      dropShadowBlur: 4,
+      dropShadowDistance: 2,
+      wordWrap: true,
+      wordWrapWidth: Math.max(320, (appRef.current?.screen.width ?? 1280) - 140),
+      breakWords: true,
+    });
+    activeSubtitleSignatureRef.current = signature;
+    syncSubtitleDisplayLayout();
+  };
+
   const clearTimeline = () => { 
     setMotionClips([]); 
     setExprClips([]); 
     setAudioClips([]); 
+    setSubtitleClips([]);
+    playheadRef.current = 0;
+    playheadUiLastTsRef.current = null;
     setPlayhead(0); 
+    resetTimelineTriggerState();
+    renderSubtitleClip(null);
     
     // ??????
     audioManager.cleanupAudio();
@@ -212,10 +431,59 @@ export default function Live2DView() {
   const changeClip = (track: TrackKind, id: string, patch: Partial<Pick<Clip, "start" | "duration">>) => {
     if (track === "motion") setMotionClips(prev => prev.map(c => (c.id === id ? { ...c, ...patch } : c)));
     else if (track === "expr") setExprClips(prev => prev.map(c => (c.id === id ? { ...c, ...patch } : c)));
-    else if (track === "audio") setAudioClips(prev => prev.map(c => (c.id === id ? { ...c, ...patch } : c)));
+    else if (track === "audio") {
+      setAudioClips(prev => prev.map(c => (c.id === id ? { ...c, ...patch } : c)));
+      setSubtitleClips(prev =>
+        prev.map((clip) => (
+          clip.linkedAudioClipId === id
+            ? {
+                ...clip,
+                ...patch,
+              }
+            : clip
+        )),
+      );
+    }
+    else if (track === "subtitle") setSubtitleClips(prev => prev.map(c => (c.id === id ? { ...c, ...patch } : c)));
   };
 
-  const setPlayheadSec = (sec: number) => setPlayhead(sec);
+  const addSubtitleClip = () => {
+    const start = Math.max(timelineLength, nextEnd(subtitleClips));
+    const duration = Math.max(0.5, exprDur || motionDur || 2);
+    setSubtitleClips((prev) => [...prev, createSubtitleClip("新字幕", start, duration)]);
+  };
+
+  const updateSubtitleClip = (
+    id: string,
+    patch: Partial<Pick<SubtitleClip, "subtitleText" | "fontFamily" | "fontSize" | "textColor" | "start" | "duration">>,
+  ) => {
+    setSubtitleClips((prev) =>
+      prev.map((clip) => {
+        if (clip.id !== id) return clip;
+        const nextText = typeof patch.subtitleText === "string" ? patch.subtitleText : clip.subtitleText;
+        return {
+          ...clip,
+          ...patch,
+          subtitleText: nextText,
+          name: buildSubtitleClipName(nextText),
+          fontSize: Math.max(12, Number(patch.fontSize ?? clip.fontSize) || DEFAULT_SUBTITLE_FONT_SIZE),
+          duration: Math.max(0.1, Number(patch.duration ?? clip.duration) || clip.duration),
+          start: Math.max(0, Number(patch.start ?? clip.start) || 0),
+        };
+      }),
+    );
+  };
+
+  const removeSubtitleClip = (id: string) => {
+    setSubtitleClips((prev) => prev.filter((clip) => clip.id !== id));
+  };
+
+  const setPlayheadSec = (sec: number) => {
+    playheadRef.current = sec;
+    playheadUiLastTsRef.current = null;
+    resetTimelineTriggerState();
+    setPlayhead(sec);
+  };
 
   // ????????????????????//
   const playMotion = (group: string) => {
@@ -256,6 +524,7 @@ export default function Live2DView() {
 
       const audioUrl = convertFileSrc(audioPath);
       const audio = new Audio(audioUrl);
+      audio.crossOrigin = "anonymous";
       await new Promise((resolve, reject) => {
         audio.onloadedmetadata = resolve;
         audio.onerror = reject;
@@ -281,6 +550,7 @@ export default function Live2DView() {
       };
 
       const audioElement = new Audio(audioUrl);
+      audioElement.crossOrigin = "anonymous";
       audioElement.preload = 'auto';
       audioElement.volume = 0.8;
       audioManager.audioRefs.current.set(audioClip.id, audioElement);
@@ -308,22 +578,30 @@ export default function Live2DView() {
     }
   };
 
-  const timelineLength = Math.max(nextEnd(motionClips), nextEnd(exprClips), nextEnd(audioClips));
+  const timelineLength = Math.max(nextEnd(motionClips), nextEnd(exprClips), nextEnd(audioClips), nextEnd(subtitleClips));
 
   const applyTimelineAtTime = (t: number, offline: boolean = false) => {
-    // ??????????????????firedRef????
-    for (const c of motionClips) {
-      if (t >= c.start && t < c.start + c.duration) {
-        // ??????????????
-        playMotion(c.name);
+    const activeMotionClip = findActiveClip(motionClips, t);
+    if (activeMotionClip) {
+      if (activeMotionClipIdRef.current !== activeMotionClip.id) {
+        activeMotionClipIdRef.current = activeMotionClip.id;
+        playMotion(activeMotionClip.name);
       }
+    } else {
+      activeMotionClipIdRef.current = null;
     }
-    for (const c of exprClips) {
-      if (t >= c.start && t < c.start + c.duration) {
-        // ??????????????
-        applyExpression(c.name);
+
+    const activeExprClip = findActiveClip(exprClips, t);
+    if (activeExprClip) {
+      if (activeExprClipIdRef.current !== activeExprClip.id) {
+        activeExprClipIdRef.current = activeExprClip.id;
+        applyExpression(activeExprClip.name);
       }
+    } else {
+      activeExprClipIdRef.current = null;
     }
+
+    renderSubtitleClip(findActiveClip(subtitleClips, t) as SubtitleClip | null);
 
     if (!offline) {
       // ??????????
@@ -332,14 +610,58 @@ export default function Live2DView() {
     }
   };
 
+  const setRendererBackgroundMode = (renderer: RendererWithBackground, transparent: boolean) => {
+    if (transparent) {
+      renderer.backgroundColor = 0x00000000;
+      renderer.backgroundAlpha = 0;
+      renderer.clearBeforeRender = true;
+      renderer.gl?.clearColor(0, 0, 0, 0);
+      return;
+    }
+
+    renderer.backgroundColor = 0xf0f0f0;
+    renderer.backgroundAlpha = 1;
+    renderer.clearBeforeRender = false;
+  };
+
+  const applyBoundsFromModelMetrics = (model: BoundsTarget) => {
+    const modelWidth = model.width * model.scale.x;
+    const modelHeight = model.height * model.scale.y;
+    const modelX = model.position.x - modelWidth / 2;
+    const modelY = model.position.y - modelHeight / 2;
+    setCustomRecordingBounds({
+      x: Math.max(0, modelX),
+      y: Math.max(0, modelY),
+      width: Math.max(100, Math.min(modelWidth, window.innerWidth)),
+      height: Math.max(100, Math.min(modelHeight, window.innerHeight)),
+    });
+  };
+
+  const syncPlayheadUi = (nextPlayhead: number, ts: number, force: boolean = false) => {
+    playheadRef.current = nextPlayhead;
+
+    if (!force) {
+      const lastUiTs = playheadUiLastTsRef.current;
+      if (lastUiTs != null && ts - lastUiTs < PLAYHEAD_UI_INTERVAL_MS) {
+        return;
+      }
+    }
+
+    playheadUiLastTsRef.current = ts;
+    startTransition(() => {
+      setPlayhead(nextPlayhead);
+    });
+  };
+
   const tick = (ts: number) => {
     if (startTsRef.current == null) startTsRef.current = ts;
     const t = (ts - startTsRef.current) / 1000;
-    setPlayhead(t);
+    syncPlayheadUi(t, ts);
 
     applyTimelineAtTime(t);
 
     if (t >= timelineLength) {
+      syncPlayheadUi(timelineLength, ts, true);
       stopPlayback();
       return;
     }
@@ -348,6 +670,9 @@ export default function Live2DView() {
 
   const startPlayback = () => {
     if (isPlaying || timelineLength <= 0) return;
+    playheadRef.current = 0;
+    playheadUiLastTsRef.current = null;
+    resetTimelineTriggerState();
     setPlayhead(0);
     setIsPlaying(true);
     startTsRef.current = null;
@@ -358,7 +683,10 @@ export default function Live2DView() {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
     startTsRef.current = null;
+    playheadUiLastTsRef.current = null;
+    resetTimelineTriggerState();
     setIsPlaying(false);
+    setPlayhead(playheadRef.current);
     
     // ?????????
     audioManager.stopAllAudio();
@@ -398,6 +726,7 @@ export default function Live2DView() {
 
   // ??????
   const startRecording = () => {
+    setBlobDefaultName("export.webm");
     recordingManager.start();
   };
 
@@ -405,14 +734,57 @@ export default function Live2DView() {
     recordingManager.stop();
   };
 
-  const startOfflineExport = async () => {
+  const formatSrtTimestamp = (timeSec: number) => {
+    const totalMs = Math.max(0, Math.round(timeSec * 1000));
+    const hours = Math.floor(totalMs / 3_600_000);
+    const minutes = Math.floor((totalMs % 3_600_000) / 60_000);
+    const seconds = Math.floor((totalMs % 60_000) / 1000);
+    const millis = totalMs % 1000;
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")},${String(millis).padStart(3, "0")}`;
+  };
+
+  const exportSubtitlesSrt = async () => {
+    const entries = [...subtitleClips]
+      .filter((clip) => clip.subtitleText.trim())
+      .sort((left, right) => left.start - right.start);
+
+    if (entries.length === 0) {
+      alert("当前没有可导出的字幕");
+      return;
+    }
+
+    const out = await save({
+      defaultPath: "subtitles.srt",
+      filters: [{ name: "SRT", extensions: ["srt"] }],
+    });
+    if (!out) return;
+
+    const content = entries
+      .map((clip, index) => [
+        String(index + 1),
+        `${formatSrtTimestamp(clip.start)} --> ${formatSrtTimestamp(clip.start + clip.duration)}`,
+        clip.subtitleText.trim(),
+        "",
+      ].join("\n"))
+      .join("\n");
+
+    await writeFile(out, new TextEncoder().encode(content));
+  };
+
+  const startOfflineExport = async (mode: ExportVisualMode = "all") => {
     if (!canvasRef.current || !appRef.current) return;
     if (recState === "rec" || recState === "offline") return;
+
+    if (mode === "subtitle-only" && subtitleClips.length === 0) {
+      alert("当前没有可导出的字幕轨内容");
+      return;
+    }
 
     const totalDuration = Math.max(
       motionClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
       exprClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
       audioClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
+      subtitleClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
       0
     );
 
@@ -456,14 +828,44 @@ export default function Live2DView() {
     let prepInterval: number | null = null;
     let firstFrame = false;
     const prepStart = Date.now();
+    let offlineTickerTimeMs = performance.now();
+    let lastExportProgressUiTs = 0;
+    const previousModelVisibility = getModelVisibilitySnapshot();
+    const previousSubtitleOverride = subtitleVisibilityOverrideRef.current;
+
+    if (mode === "subtitle-only") {
+      setModelVisibility(false);
+      subtitleVisibilityOverrideRef.current = true;
+      setBlobDefaultName("subtitles-only.webm");
+    } else if (mode === "live2d-only") {
+      setModelVisibility(true);
+      subtitleVisibilityOverrideRef.current = false;
+      setBlobDefaultName("live2d-only.webm");
+    } else {
+      setModelVisibility(true);
+      subtitleVisibilityOverrideRef.current = null;
+      setBlobDefaultName("export.webm");
+    }
+    renderSubtitleClip(findActiveClip(subtitleClips, playheadRef.current) as SubtitleClip | null);
+
+    const updateOfflineExportUi = (timeSec: number, progressPct: number, force: boolean = false) => {
+      const now = performance.now();
+      if (!force && now - lastExportProgressUiTs < EXPORT_PROGRESS_UI_INTERVAL_MS) {
+        return;
+      }
+      lastExportProgressUiTs = now;
+      startTransition(() => {
+        setRecordingTime(timeSec);
+        setRecordingProgress(progressPct);
+      });
+    };
 
     try {
       prepInterval = window.setInterval(() => {
         if (firstFrame) return;
         const elapsed = (Date.now() - prepStart) / 1000;
         const pct = Math.min(0.05, elapsed * 0.2);
-        setRecordingProgress(pct * 100);
-        setRecordingTime(elapsed);
+        updateOfflineExportUi(elapsed, pct * 100);
       }, 100);
       const result = await runOfflineWebMExport({
         canvas: exportCanvas,
@@ -471,8 +873,9 @@ export default function Live2DView() {
         targetFrameCount: targetFrames,
         applyTimelineAtTime: (timeSec) => applyTimelineAtTime(timeSec, true),
         renderFrame: () => {
-          app.ticker.update(1000 / settings.fps);
-          app.renderer.render(app.stage);
+          offlineTickerTimeMs += 1000 / settings.fps;
+          // Application already binds render() to ticker, so one ticker update is enough.
+          app.ticker.update(offlineTickerTimeMs);
           if (exportCtx) {
             if (transparentBg) {
               exportCtx.clearRect(0, 0, exportCanvas.width, exportCanvas.height);
@@ -502,8 +905,11 @@ export default function Live2DView() {
             firstFrame = true;
             if (prepInterval) { clearInterval(prepInterval); prepInterval = null; }
           }
-          setRecordingTime(timeSec);
-          setRecordingProgress((frameIndex / totalFrames) * 100);
+          updateOfflineExportUi(
+            timeSec,
+            (frameIndex / totalFrames) * 100,
+            frameIndex >= totalFrames,
+          );
         }
       });
 
@@ -518,6 +924,9 @@ export default function Live2DView() {
       setRecordingTime(0);
       setRecordingProgress(0);
     } finally {
+      restoreModelVisibility(previousModelVisibility);
+      subtitleVisibilityOverrideRef.current = previousSubtitleOverride;
+      renderSubtitleClip(findActiveClip(subtitleClips, playheadRef.current) as SubtitleClip | null);
       if (prepInterval) { clearInterval(prepInterval); prepInterval = null; }
       if (wasTickerStarted) app.ticker.start();
     }
@@ -529,6 +938,7 @@ export default function Live2DView() {
     motionClips,
     exprClips,
     audioClips,
+    subtitleClips,
     recordingQuality,
     customRecordingBounds,
     useModelFrame,
@@ -541,8 +951,13 @@ export default function Live2DView() {
   });
 
   const saveWebM = async () => {
-    if (!recordingManager.recRef.current || !blob) return;
-    await recordingManager.recRef.current.saveWebM(blob);
+    if (!blob) return;
+    const out = await save({
+      defaultPath: blobDefaultName,
+      filters: [{ name: "WebM", extensions: ["webm"] }],
+    });
+    if (!out) return;
+    await writeFile(out, new Uint8Array(await blob.arrayBuffer()));
   };
 
   const toMov = async () => {
@@ -554,25 +969,6 @@ export default function Live2DView() {
     if (!out) return;
     await invoke("vp9_to_prores4444", { inWebm: abs, outMov: out });
   };
-
-
-
-  // ?WebGAL????????????????
-  const cleanupLocalModeModelsAfterWebGAL = () => {
-    try {
-      
-      // ?????????????????????WebGAL??
-      // ???????????????
-      setModelData(null);
-      setCustomRecordingBounds({ x: 0, y: 0, width: 0, height: 0 });
-      
-      
-    } catch (error) {
-      console.warn('?? ?????????????:', error);
-    }
-  };
-
-
 
   // ??WebGAL??????
   const exitWebGALMode = () => {
@@ -586,6 +982,7 @@ export default function Live2DView() {
       
       // ??????
       clearTimeline();
+      setExternalModelDisplayName(null);
       
       
     } catch (error) {
@@ -593,134 +990,145 @@ export default function Live2DView() {
     }
   };
 
-    // ??WebGAL????
-  const importWebGALTimeline = async (commands: any[]) => {
-    try {
-      
-      
-      const parser = new WebGALParser();
+  const createImportedAudioElement = (clipId: string, audioUrl: string) => {
+    const audioElement = new Audio(audioUrl);
+    audioElement.crossOrigin = "anonymous";
+    audioElement.preload = "auto";
+    audioElement.volume = 0.8;
+    audioManager.audioRefs.current.set(clipId, audioElement);
 
-    let currentTime = 0;
-
-    for (const command of commands) {
-      if (command.type === 'changeFigure') {
-        const figure = command.data;
-
-        if (figure.path) {
-          try {
-            // ??????figure??????????
-            const resolved = parser.resolveFigurePath(figure.path);
-
-            // ???????Live2D??
-            try {
-              // ?????loadAnyModel??????
-              await modelManager.loadAnyModel(appRef.current!, resolved);
-              
-              // WebGAL????????????????????
-              // ????????????????????WebGAL??
-              cleanupLocalModeModelsAfterWebGAL();
-              
-            } catch (loadError) {
-              console.error('????????:', {
-                originalPath: figure.path,
-                resolvedPath: resolved,
-                error: loadError instanceof Error ? loadError.message : String(loadError)
-              });
-            }
-          } catch (error) {
-            console.error('??????????:', {
-              originalPath: figure.path,
-              error: error instanceof Error ? error.message : String(error)
-            });
-          }
-        }
-
-        // ???? motion/expression ????
-        if (figure.motion || figure.expression) {
-          const startTime = currentTime;
-          const duration = 2.0;
-
-          if (figure.motion) {
-            setMotionClips(prev => [...prev, {
-              id: crypto.randomUUID(),
-              name: figure.motion,
-              start: startTime,
-              duration
-            }]);
-          }
-
-          if (figure.expression) {
-            setExprClips(prev => [...prev, {
-              id: crypto.randomUUID(),
-              name: figure.expression,
-              start: startTime,
-              duration
-            }]);
-          }
-
-          currentTime += duration;
-        }
-      } else if (command.type === 'dialogue') {
-        const dialogue = command.data;
-
-        // ??????
-        const audioAbs = parser.resolveAudioPath(dialogue.audioPath);
-
-        if (audioAbs) {
-          try {
-            const audio = new Audio(audioAbs);
-            await new Promise((resolve) => {
-              audio.onloadedmetadata = resolve;
-              audio.load();
-            });
-
-            const duration = audio.duration || 3.0;
-
-            const audioClip = {
-              id: crypto.randomUUID(),
-              name: `${dialogue.speaker ?? ''}: ${dialogue.text.substring(0, 20)}...`,
-              start: currentTime,
-              duration,
-              audioUrl: audioAbs,
-              audioPath: audioAbs
-            };
-
-            setAudioClips(prev => [...prev, audioClip]);
-
-            // ??????
-            audioManager.audioRefs.current.set(audioClip.id, audio);
-            if (audioManager.audioContextRef.current) {
-              try {
-                const source = audioManager.audioContextRef.current.createMediaElementSource(audio);
-                const analyzer = audioManager.audioContextRef.current.createAnalyser();
-                analyzer.fftSize = 256;
-                analyzer.smoothingTimeConstant = 0.8;
-
-                source.connect(analyzer);
-                analyzer.connect(audioManager.audioContextRef.current.destination);
-
-                audioManager.audioAnalyzersRef.current.set(audioClip.id, { source, analyzer });
-              } catch (error) {
-                console.warn('??????????', error);
-              }
-            }
-
-            currentTime += duration;
-          } catch (error) {
-            console.warn('??????:', error);
-            currentTime += 3.0;
-          }
-        } else {
-          currentTime += 2.0; // ??????????
-        }
+    if (audioManager.audioContextRef.current) {
+      try {
+        const source = audioManager.audioContextRef.current.createMediaElementSource(audioElement);
+        const analyzer = audioManager.audioContextRef.current.createAnalyser();
+        analyzer.fftSize = 256;
+        analyzer.smoothingTimeConstant = 0.8;
+        source.connect(analyzer);
+        analyzer.connect(audioManager.audioContextRef.current.destination);
+        audioManager.audioAnalyzersRef.current.set(clipId, { source, analyzer });
+      } catch (error) {
+        console.warn("WebGAL 音频分析器初始化失败", error);
       }
     }
 
-  } catch (error) {
-    console.error('??WebGAL??????', error);
-    alert('????: ' + error);
-  }
-};
+    return audioElement;
+  };
+
+  const buildImportedAudioName = (speaker?: string, text?: string) => {
+    const trimmedText = (text ?? "").trim();
+    if (!trimmedText) {
+      return speaker ? `${speaker} 语音` : "WebGAL 语音";
+    }
+    const previewText = trimmedText.length > 18 ? `${trimmedText.slice(0, 18)}...` : trimmedText;
+    return speaker ? `${speaker}: ${previewText}` : previewText;
+  };
+
+  // ??WebGAL????
+  const importWebGALTimeline = async (plan: WebGALImportPlan) => {
+    try {
+      if (!appRef.current) {
+        throw new Error("PIXI 预览器尚未初始化");
+      }
+
+      stopPlayback();
+      clearTimeline();
+      audioManager.initAudioContext();
+
+      const absoluteFigurePath = await resolveFigureAbsolutePath(plan.projectRoot, plan.selectedFigurePath);
+      const figureUrl = await buildWebGALExternalAssetUrl(plan.projectRoot, absoluteFigurePath);
+
+      if (modelManager) {
+        modelManager.cleanupCurrentModel();
+      }
+
+      setModelData(null);
+      setMotionLen({});
+      setCurrentMotion("");
+      setCurrentExpression("default");
+      setCustomRecordingBounds({ x: 0, y: 0, width: 0, height: 0 });
+
+      await modelManager.loadAnyModel(appRef.current, figureUrl);
+
+      const importedMotionDurations: MotionLenMap = await loadWebGALMotionDurations(absoluteFigurePath).catch(
+        () => ({} as MotionLenMap),
+      );
+      setMotionLen(importedMotionDurations);
+
+      const nextMotionClips: Clip[] = [];
+      const nextExprClips: Clip[] = [];
+      const nextAudioClips: Clip[] = [];
+      const nextSubtitleClips: SubtitleClip[] = [];
+      let timelineCursor = 0;
+
+      for (const group of plan.groups) {
+        const duration =
+          group.audioDurationSec ??
+          (group.motion ? importedMotionDurations[group.motion] : undefined) ??
+          (group.motion ? motionLen[group.motion] : undefined) ??
+          motionDur ??
+          exprDur;
+
+        if (group.motion) {
+          nextMotionClips.push({
+            id: crypto.randomUUID(),
+            name: group.motion,
+            start: timelineCursor,
+            duration,
+          });
+        }
+
+        if (group.expression) {
+          nextExprClips.push({
+            id: crypto.randomUUID(),
+            name: group.expression,
+            start: timelineCursor,
+            duration,
+          });
+        }
+
+        let linkedAudioClipId: string | undefined;
+
+        if (group.audioAbsolutePath) {
+          const clipId = crypto.randomUUID();
+          const audioUrl = await buildWebGALExternalAssetUrl(plan.projectRoot, group.audioAbsolutePath);
+          createImportedAudioElement(clipId, audioUrl);
+          nextAudioClips.push({
+            id: clipId,
+            name: buildImportedAudioName(group.speaker, group.text),
+            start: timelineCursor,
+            duration,
+            audioUrl,
+            audioPath: group.audioAbsolutePath,
+          });
+          linkedAudioClipId = clipId;
+        }
+
+        if (plan.includeSubtitles && group.text?.trim()) {
+          nextSubtitleClips.push(
+            createSubtitleClip(group.text.trim(), timelineCursor, duration, {
+              linkedAudioClipId,
+            }),
+          );
+        }
+
+        timelineCursor += duration;
+      }
+
+      setMotionClips(nextMotionClips);
+      setExprClips(nextExprClips);
+      setAudioClips(nextAudioClips);
+      setSubtitleClips(nextSubtitleClips);
+      setExternalModelDisplayName(`${plan.selectedRoleLabel} · ${plan.selectedFigurePath}`);
+      playheadRef.current = 0;
+      playheadUiLastTsRef.current = null;
+      setPlayhead(0);
+      resetTimelineTriggerState();
+      requestAnimationFrame(() => refreshCharacterEditor());
+    } catch (error) {
+      console.error("WebGAL 导入失败", error);
+      alert(`导入失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
 
 
   // ????????- ?? getBounds() ??????????
@@ -745,7 +1153,7 @@ export default function Live2DView() {
         const model = modelRef.current;
         try {
           // ???? getBounds ????????
-          const b = (model as any).getBounds?.() || model.getLocalBounds?.();
+          const b = model.getBounds() || model.getLocalBounds();
           if (b && b.width > 0 && b.height > 0) {
             setCustomRecordingBounds({
               x: Math.max(0, b.x),
@@ -754,30 +1162,10 @@ export default function Live2DView() {
               height: Math.max(100, Math.min(b.height, window.innerHeight)),
             });
           } else {
-            // ??????scale ??position ??
-            const modelWidth = model.width * model.scale.x;
-            const modelHeight = model.height * model.scale.y;
-            const modelX = model.position.x - modelWidth / 2;
-            const modelY = model.position.y - modelHeight / 2;
-            setCustomRecordingBounds({
-              x: Math.max(0, modelX),
-              y: Math.max(0, modelY),
-              width: Math.max(100, Math.min(modelWidth, window.innerWidth)),
-              height: Math.max(100, Math.min(modelHeight, window.innerHeight)),
-            });
+            applyBoundsFromModelMetrics(model);
           }
         } catch (e) {
-          // ????
-          const modelWidth = model.width * model.scale.x;
-          const modelHeight = model.height * model.scale.y;
-          const modelX = model.position.x - modelWidth / 2;
-          const modelY = model.position.y - modelHeight / 2;
-          setCustomRecordingBounds({
-            x: Math.max(0, modelX),
-            y: Math.max(0, modelY),
-            width: Math.max(100, Math.min(modelWidth, window.innerWidth)),
-            height: Math.max(100, Math.min(modelHeight, window.innerHeight)),
-          });
+          applyBoundsFromModelMetrics(model);
         }
       }
     }
@@ -838,7 +1226,7 @@ export default function Live2DView() {
     const run = async () => {
       if (!containerRef.current) return;
 
-      (window as any).PIXI = PIXI;
+      window.PIXI = PIXI;
       // ??? view?? PixiJS ?????? canvas??????? canvas ?? WebGL ???
       // ?? 0?? MAX_TEXTURE_IMAGE_UNITS????? checkMaxIfStatementsInShader ??
       const app = new PIXI.Application({
@@ -851,16 +1239,28 @@ export default function Live2DView() {
       (app.view as HTMLCanvasElement).className = "live2d-canvas";
       canvasRef.current = app.view as HTMLCanvasElement;
       appRef.current = app;
+      app.stage.sortableChildren = true;
 
-      if (transparentBg) {
-        (app.renderer as any).backgroundColor = 0x00000000;
-        (app.renderer as any).backgroundAlpha = 0;
-        (app.renderer as any).clearBeforeRender = true;
-      } else {
-        (app.renderer as any).backgroundColor = 0xf0f0f0;
-        (app.renderer as any).backgroundAlpha = 1;
-        (app.renderer as any).clearBeforeRender = false;
-      }
+      const subtitleText = new PIXI.Text("", {
+        fontFamily: DEFAULT_SUBTITLE_FONT_FAMILY,
+        fontSize: DEFAULT_SUBTITLE_FONT_SIZE,
+        fontWeight: "700",
+        fill: DEFAULT_SUBTITLE_TEXT_COLOR,
+        align: "center",
+        stroke: "#081018",
+        strokeThickness: 6,
+        lineJoin: "round",
+        wordWrap: true,
+        wordWrapWidth: Math.max(320, app.screen.width - 140),
+      });
+      subtitleText.anchor.set(0.5, 1);
+      subtitleText.visible = false;
+      subtitleText.zIndex = 10_000;
+      app.stage.addChild(subtitleText);
+      subtitleTextRef.current = subtitleText;
+      syncSubtitleDisplayLayout();
+
+      setRendererBackgroundMode(app.renderer as RendererWithBackground, transparentBg);
 
       // ????????????
       if (modelUrl) {
@@ -868,19 +1268,14 @@ export default function Live2DView() {
         if (disposed) return;
       }
 
-      // ????
-      if (transparentBg) {
-        const gl = (app.renderer as any).gl;
-        if (gl) gl.clearColor(0, 0, 0, 0);
-      }
-
       resizeHandler = () => {
         if (!appRef.current) return;
         if (isCompositeRef.current && groupContainerRef.current) {
           groupContainerRef.current.position.set(appRef.current.screen.width / 2, appRef.current.screen.height / 2);
         } else if (modelRef.current && !Array.isArray(modelRef.current)) {
-          (modelRef.current as any).position.set(appRef.current.screen.width / 2, appRef.current.screen.height / 2);
+          modelRef.current.position.set(appRef.current.screen.width / 2, appRef.current.screen.height / 2);
         }
+        syncSubtitleDisplayLayout();
       };
       window.addEventListener("resize", resizeHandler);
     };
@@ -898,6 +1293,7 @@ export default function Live2DView() {
         } catch {}
         appRef.current = null;
       }
+      subtitleTextRef.current = null;
       modelRef.current = null;
       groupContainerRef.current = null;
     };
@@ -907,17 +1303,14 @@ export default function Live2DView() {
   // ??????????renderer
   useEffect(() => {
     if (appRef.current) {
-      if (transparentBg) {
-        (appRef.current.renderer as any).backgroundColor = 0x00000000;
-        (appRef.current.renderer as any).backgroundAlpha = 0;
-        (appRef.current.renderer as any).clearBeforeRender = true;
-      } else {
-        (appRef.current.renderer as any).backgroundColor = 0xf0f0f0;
-        (appRef.current.renderer as any).backgroundAlpha = 1;
-        (appRef.current.renderer as any).clearBeforeRender = false;
-      }
+      setRendererBackgroundMode(appRef.current.renderer as RendererWithBackground, transparentBg);
     }
   }, [transparentBg]);
+
+  useEffect(() => {
+    if (isPlaying) return;
+    renderSubtitleClip(findActiveClip(subtitleClips, playhead) as SubtitleClip | null);
+  }, [subtitleClips, playhead, isPlaying, showSubtitles]);
 
   // ??????????
   useEffect(() => {
@@ -942,15 +1335,61 @@ export default function Live2DView() {
   }, [isPlaying]);
 
   useEffect(() => {
+    characterTransformRef.current = characterTransform;
+  }, [characterTransform]);
+
+  useEffect(() => {
     refreshCharacterEditor();
   }, [selectedModel, selectedCharacterId, isDragging]);
+
+  useEffect(() => {
+    const handleWheelTransform = (event: WheelEvent) => {
+      if (!enableDragging || !isDraggingRef.current) return;
+      if (!event.ctrlKey && !event.altKey) return;
+      if (
+        event.target instanceof HTMLInputElement ||
+        event.target instanceof HTMLTextAreaElement ||
+        event.target instanceof HTMLSelectElement
+      ) {
+        return;
+      }
+
+      if (event.ctrlKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        updateUniformScale(event.deltaY > 0 ? 0.96 : 1.04);
+        return;
+      }
+
+      if (event.altKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        const current = characterTransformRef.current;
+        updateSelectedCharacterTransform({ rotation: current.rotation + (event.deltaY > 0 ? 4 : -4) });
+      }
+    };
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const wheelListenerOptions: AddEventListenerOptions = { passive: false, capture: true };
+
+    canvas.addEventListener("wheel", handleWheelTransform, wheelListenerOptions);
+    return () => {
+      canvas.removeEventListener("wheel", handleWheelTransform, wheelListenerOptions);
+    };
+  }, [enableDragging, modelUrl]);
 
 
   // ?????????????????
   useEffect(() => {
     (async () => {
       if (!appRef.current) return;
-      if (!modelUrl) return;
+      if (!modelUrl) {
+        setCharacterOptions([]);
+        setSelectedCharacterId("main");
+        setCharacterTransform({ x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0 });
+        return;
+      }
 
       // ??????????
       stopPlayback();
@@ -1002,146 +1441,251 @@ export default function Live2DView() {
     return () => { aborted = true; };
   }, [modelData, modelUrl]);
 
-  return (
-    <div className="live2d-container">
-      <div ref={containerRef} data-transparent="true" />
+  const selectedModelParts = selectedModel ? selectedModel.split("/") : [];
+  const selectedModelDisplayName = externalModelDisplayName ?? (
+    selectedModel
+      ? (selectedModelParts[selectedModelParts.length - 2] ?? selectedModel)
+      : "未加载模型"
+  );
+  const panelProps = {
+    onToggleWebGALMode: () => setShowWebGALMode(true),
+    modelList,
+    selectedModel,
+    onSelectModel: (rel: string | null) => {
+      setExternalModelDisplayName(null);
+      setSelectedModel(rel || null);
+    },
+    onRefreshModels: refreshModels,
+    modelData,
+    motionLen,
+    currentMotion,
+    currentExpression,
+    motionDur,
+    exprDur,
+    setMotionDur,
+    setExprDur,
+    chooseMotion: (name: string) => {
+      playMotion(name);
+      setCurrentMotion(name);
+    },
+    chooseExpression: (name: string) => {
+      applyExpression(name);
+      setCurrentExpression(name);
+    },
+    addMotionClip,
+    addExprClip,
+    addAudioClip,
+    subtitleClips,
+    showSubtitles,
+    setShowSubtitles,
+    onAddSubtitleClip: addSubtitleClip,
+    onUpdateSubtitleClip: updateSubtitleClip,
+    onRemoveSubtitleClip: removeSubtitleClip,
+    characterOptions,
+    selectedCharacterId,
+    onSelectCharacter: setSelectedCharacterId,
+    characterTransform,
+    onUpdateCharacterTransform: updateSelectedCharacterTransform,
+    enableDragging,
+    setEnableDragging,
+    isDragging,
+    timelineLength,
+    playhead,
+    isPlaying,
+    startPlayback,
+    stopPlayback,
+    clearTimeline,
+    currentAudioLevel,
+    currentFps,
+    recordingQuality,
+    setRecordingQuality,
+    transparentBg,
+    setTransparentBg,
+    recState,
+    recordingTime,
+    recordingProgress,
+    blob,
+    onStartRecording: startRecording,
+    onStopRecording: stopRecording,
+    onSaveWebM: saveWebM,
+    onConvertToMov: toMov,
+    onStartOfflineExport: () => void startOfflineExport("all"),
+    onStartSubtitleOnlyExport: () => void startOfflineExport("subtitle-only"),
+    onStartLive2DOnlyExport: () => void startOfflineExport("live2d-only"),
+    onExportSubtitlesSrt: exportSubtitlesSrt,
+    onTakeScreenshot: () => recordingManager.takeScreenshot(),
+    onTakePartsScreenshots: () => recordingManager.takePartsScreenshots(),
+    isVp9AlphaSupported,
+  };
 
-      {/* WebGAL?? */}
-               {showWebGALMode && (
+  return (
+    <div className="editor-shell">
+      <header className="editor-topbar">
+        <div className="editor-topbar-brand">
+          <div className="editor-topbar-kicker">Live2D Movie Maker</div>
+          <h1>桌面工作区</h1>
+        </div>
+
+        <div className="editor-topbar-main">
+          <div className="topbar-select-group">
+            <label className="topbar-label" htmlFor="topbar-model-select">
+              模型
+            </label>
+            <select
+              id="topbar-model-select"
+              className="input input--topbar"
+              value={selectedModel ?? ""}
+              onChange={(event) => setSelectedModel(event.target.value || null)}
+            >
+              {modelList.length === 0 ? <option value="">未发现模型</option> : null}
+              {modelList.map((rel) => (
+                <option key={rel} value={rel}>
+                  {rel}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="topbar-button-group">
+            <button className="btn btn--quiet" onClick={refreshModels}>
+              刷新模型
+            </button>
+            <button className={`btn ${isPlaying ? "btn--accent" : "btn--primary"}`} onClick={isPlaying ? stopPlayback : startPlayback} disabled={!timelineLength && !isPlaying}>
+              {isPlaying ? "停止播放" : "开始播放"}
+            </button>
+            <button
+              className={`btn ${recState === "rec" ? "btn--danger" : "btn--accent"}`}
+              onClick={recState === "rec" ? stopRecording : startRecording}
+              disabled={recState === "offline"}
+            >
+              {recState === "rec" ? "停止录制" : "录制 WebM"}
+            </button>
+            <button className="btn btn--quiet" onClick={addAudioClip}>
+              导入音频
+            </button>
+            <button className="btn btn--quiet" onClick={() => setShowWebGALMode(true)}>
+              WebGAL 工具
+            </button>
+          </div>
+        </div>
+
+      </header>
+
+      <div className="editor-workspace">
+        <aside className="workspace-dock workspace-dock--left">
+          <ControlPanel
+            {...panelProps}
+            mode="resources"
+          />
+        </aside>
+
+        <main className="editor-main">
+          <section className="monitor-shell">
+            <div className="monitor-header">
+              <div className="monitor-heading">
+                <div className="monitor-kicker">Program Monitor</div>
+                <h2>{selectedModelDisplayName}</h2>
+              </div>
+              <div className="monitor-meta">
+                <span>{transparentBg ? "透明背景" : "实色背景"}</span>
+                <span>时间线 {timelineLength.toFixed(2)} 秒</span>
+              </div>
+            </div>
+
+            <div className="monitor-stage">
+              <div
+                ref={containerRef}
+                className={`monitor-canvas-host ${transparentBg ? "is-transparent" : "is-solid"}`}
+                data-transparent={transparentBg}
+              />
+
+              {!selectedModel ? (
+                <div className="monitor-empty">
+                  <strong>先加载一个 Live2D 模型</strong>
+                  <span>在顶部或左侧资源区选择模型，然后开始预览、编排和导出。</span>
+                </div>
+              ) : null}
+
+              <div className="monitor-overlay monitor-overlay--top">
+                <span>预览器</span>
+                <span>{currentMotion ? `动作 ${currentMotion}` : "等待动作"}</span>
+                <span>{currentExpression ? `表情 ${currentExpression}` : "默认表情"}</span>
+              </div>
+
+              <div className="monitor-overlay monitor-overlay--bottom">
+                <span>FPS {currentFps.toFixed(1)}</span>
+                <span>播放头 {playhead.toFixed(2)} 秒</span>
+                <span>{enableDragging ? "允许拖拽" : "拖拽关闭"}</span>
+              </div>
+            </div>
+          </section>
+        </main>
+
+        <aside className="workspace-dock workspace-dock--right">
+          <ControlPanel
+            {...panelProps}
+            mode="inspector"
+            activeInspectorTab={activeInspectorTab}
+            onChangeInspectorTab={setActiveInspectorTab}
+          />
+        </aside>
+      </div>
+
+      <section className="timeline-shell">
+        <Timeline
+          motionClips={motionClips}
+          exprClips={exprClips}
+          audioClips={audioClips}
+          subtitleClips={subtitleClips}
+          playheadSec={playhead}
+          playheadSourceRef={playheadRef}
+          onChangeClip={changeClip}
+          onRemoveClip={(track, id) => {
+            if (track === "motion") setMotionClips(prev => prev.filter(c => c.id !== id));
+            else if (track === "expr") setExprClips(prev => prev.filter(c => c.id !== id));
+            else if (track === "audio") {
+              setAudioClips(prev => prev.filter(c => c.id !== id));
+              setSubtitleClips(prev => prev.map((clip) => (
+                clip.linkedAudioClipId === id
+                  ? { ...clip, linkedAudioClipId: undefined }
+                  : clip
+              )));
+              const audio = audioManager.audioRefs.current.get(id);
+              if (audio) {
+                audio.pause();
+                audio.src = "";
+                audioManager.audioRefs.current.delete(id);
+              }
+              const analyzerData = audioManager.audioAnalyzersRef.current.get(id);
+              if (analyzerData) {
+                try {
+                  analyzerData.source.disconnect();
+                  analyzerData.analyzer.disconnect();
+                } catch {}
+                audioManager.audioAnalyzersRef.current.delete(id);
+              }
+            } else if (track === "subtitle") {
+              removeSubtitleClip(id);
+            }
+          }}
+          onSetPlayhead={setPlayheadSec}
+          onStartPlayback={startPlayback}
+          onStopPlayback={stopPlayback}
+          isPlaying={isPlaying}
+        />
+      </section>
+
+      {showWebGALMode && (
+        <div className="editor-overlay">
           <WebGALMode
             onClose={() => setShowWebGALMode(false)}
             onImportTimeline={importWebGALTimeline}
             onExitWebGALMode={exitWebGALMode}
+            defaultMotionDuration={motionDur}
+            defaultExpressionDuration={exprDur}
           />
-        )}
-
-      {/* ???? */}
-      {showControls && (
-                 <ControlPanel
-           onClose={() => setShowControls(false)}
-           onToggleWebGALMode={() => setShowWebGALMode(!showWebGALMode)}
-
-          // ????
-          modelList={modelList}
-          selectedModel={selectedModel}
-          onSelectModel={(rel) => setSelectedModel(rel || null)}
-          onRefreshModels={refreshModels}
-
-          modelData={modelData}
-          motionLen={motionLen}
-          currentMotion={currentMotion}
-          currentExpression={currentExpression}
-          motionDur={motionDur}
-          exprDur={exprDur}
-          setMotionDur={setMotionDur}
-          setExprDur={setExprDur}
-          chooseMotion={(name) => { playMotion(name); setCurrentMotion(name); }}
-          chooseExpression={(name) => { applyExpression(name); setCurrentExpression(name); }}
-          addMotionClip={addMotionClip}
-          addExprClip={addExprClip}
-          addAudioClip={addAudioClip}
-          characterOptions={characterOptions}
-          selectedCharacterId={selectedCharacterId}
-          onSelectCharacter={setSelectedCharacterId}
-          characterTransform={characterTransform}
-          onUpdateCharacterTransform={updateSelectedCharacterTransform}
-
-          enableDragging={enableDragging}
-          setEnableDragging={setEnableDragging}
-          isDragging={isDragging}
-          timelineLength={Math.max(
-            motionClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
-            exprClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
-            audioClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0)
-          )}
-          playhead={playhead}
-          isPlaying={isPlaying}
-          startPlayback={startPlayback}
-          stopPlayback={stopPlayback}
-          clearTimeline={clearTimeline}
-          onChangeClip={changeClip}
-          onSetPlayhead={setPlayheadSec}
-          currentAudioLevel={currentAudioLevel}
-          currentFps={currentFps}
-        />
-      )}
-
-      {/* ????*/}
-      <Timeline
-        motionClips={motionClips}
-        exprClips={exprClips}
-        audioClips={audioClips}
-        playheadSec={playhead}
-        onChangeClip={changeClip}
-        onRemoveClip={(track, id) => {
-          if (track === "motion") setMotionClips(prev => prev.filter(c => c.id !== id));
-          else if (track === "expr") setExprClips(prev => prev.filter(c => c.id !== id));
-          else if (track === "audio") {
-            setAudioClips(prev => prev.filter(c => c.id !== id));
-            // ??????
-            const audio = audioManager.audioRefs.current.get(id);
-            if (audio) {
-              audio.pause();
-              audio.src = '';
-              audioManager.audioRefs.current.delete(id);
-            }
-            // ????????
-            const analyzerData = audioManager.audioAnalyzersRef.current.get(id);
-            if (analyzerData) {
-              try {
-                analyzerData.source.disconnect();
-                analyzerData.analyzer.disconnect();
-              } catch { /* empty */ }
-              audioManager.audioAnalyzersRef.current.delete(id);
-            }
-          }
-        }}
-        onSetPlayhead={setPlayheadSec}
-        onStartPlayback={startPlayback}
-        onStopPlayback={stopPlayback}
-        isPlaying={isPlaying}
-      />
-
-      {/* ?????????? */}
-      <ExportToolbar
-        recordingQuality={recordingQuality}
-        setRecordingQuality={setRecordingQuality}
-        transparentBg={transparentBg}
-        setTransparentBg={setTransparentBg}
-        recState={recState}
-        recordingTime={recordingTime}
-        recordingProgress={recordingProgress}
-        blob={blob}
-        onStartRecording={startRecording}
-        onStopRecording={stopRecording}
-        onSaveWebM={saveWebM}
-        onConvertToMov={toMov}
-        onStartOfflineExport={startOfflineExport}
-        onTakeScreenshot={() => recordingManager.takeScreenshot()}
-        onTakePartsScreenshots={() => recordingManager.takePartsScreenshots()}
-        isVp9AlphaSupported={isVp9AlphaSupported}
-      />
-
-      {!showControls && (
-        <button className="l2d-toggle" onClick={() => setShowControls(true)}>
-          ??????????
-        </button>
+        </div>
       )}
     </div>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
