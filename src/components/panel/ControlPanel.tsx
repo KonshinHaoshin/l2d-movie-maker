@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import ExportToolbar from "../ExportToolbar";
+import type { SubtitleClip } from "../timeline/clipTypes";
 
 interface Motion {
   name: string;
@@ -30,7 +32,7 @@ type CharacterTransform = {
 };
 
 export type ControlPanelMode = "resources" | "inspector";
-export type InspectorTab = "character" | "export" | "audio" | "project";
+export type InspectorTab = "character" | "subtitle" | "export" | "audio" | "project";
 
 type Props = {
   mode: ControlPanelMode;
@@ -59,6 +61,13 @@ type Props = {
   addMotionClip: (name: string) => void;
   addExprClip: (name: string) => void;
   addAudioClip: () => void;
+  subtitleClips: SubtitleClip[];
+  onAddSubtitleClip: () => void;
+  onUpdateSubtitleClip: (
+    id: string,
+    patch: Partial<Pick<SubtitleClip, "subtitleText" | "fontFamily" | "fontSize" | "textColor" | "start" | "duration">>,
+  ) => void;
+  onRemoveSubtitleClip: (id: string) => void;
   currentAudioLevel?: number;
   currentFps?: number;
 
@@ -99,9 +108,23 @@ type Props = {
 
 const inspectorTabs: Array<{ id: InspectorTab; label: string }> = [
   { id: "character", label: "角色" },
+  { id: "subtitle", label: "字幕" },
   { id: "export", label: "导出" },
   { id: "audio", label: "音频" },
   { id: "project", label: "项目" },
+];
+
+const FALLBACK_SUBTITLE_FONTS = [
+  "Microsoft YaHei",
+  "Microsoft YaHei UI",
+  "SimHei",
+  "SimSun",
+  "KaiTi",
+  "FangSong",
+  "Source Han Sans SC",
+  "Noto Sans CJK SC",
+  "Segoe UI",
+  "Arial",
 ];
 
 function PanelSection({
@@ -177,6 +200,10 @@ export default function ControlPanel(props: Props) {
     addMotionClip,
     addExprClip,
     addAudioClip,
+    subtitleClips,
+    onAddSubtitleClip,
+    onUpdateSubtitleClip,
+    onRemoveSubtitleClip,
     characterOptions,
     selectedCharacterId,
     onSelectCharacter,
@@ -218,6 +245,7 @@ export default function ControlPanel(props: Props) {
   const [exprQuery, setExprQuery] = useState("");
   const [exprPage, setExprPage] = useState(1);
   const [exprPageSize, setExprPageSize] = useState(12);
+  const [availableSubtitleFonts, setAvailableSubtitleFonts] = useState<string[]>(FALLBACK_SUBTITLE_FONTS);
   const paneScrollRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -255,6 +283,26 @@ export default function ControlPanel(props: Props) {
   useEffect(() => {
     setExprPage(1);
   }, [exprQuery, exprPageSize, modelData]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void invoke<string[]>("list_system_font_families")
+      .then((fonts) => {
+        if (cancelled || !Array.isArray(fonts) || fonts.length === 0) return;
+        const merged = Array.from(new Set([...fonts, ...FALLBACK_SUBTITLE_FONTS]));
+        setAvailableSubtitleFonts(merged);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAvailableSubtitleFonts(FALLBACK_SUBTITLE_FONTS);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const allMotionNames = useMemo(
     () => (modelData ? Object.keys(modelData.motions || {}) : []),
@@ -295,6 +343,18 @@ export default function ControlPanel(props: Props) {
 
   const formatTransformValue = (value: number, digits: number, fallback: string) =>
     Number.isFinite(value) ? value.toFixed(digits) : fallback;
+
+  const subtitleFontFamily = subtitleClips[0]?.fontFamily || FALLBACK_SUBTITLE_FONTS[0];
+  const subtitleFontSize = subtitleClips[0]?.fontSize ?? 34;
+
+  const applySubtitleFontFamilyToAll = (fontFamily: string) => {
+    subtitleClips.forEach((clip) => onUpdateSubtitleClip(clip.id, { fontFamily }));
+  };
+
+  const applySubtitleFontSizeToAll = (fontSize: number) => {
+    const nextFontSize = Math.max(12, fontSize || 12);
+    subtitleClips.forEach((clip) => onUpdateSubtitleClip(clip.id, { fontSize: nextFontSize }));
+  };
 
   const [transformDraft, setTransformDraft] = useState({
     x: formatTransformValue(characterTransform.x, 1, "0"),
@@ -572,6 +632,131 @@ export default function ControlPanel(props: Props) {
                     />
                     <span>{isDragging ? "正在拖拽模型" : "允许在预览区直接拖拽模型"}</span>
                   </label>
+                </PanelSection>
+              </>
+            ) : null}
+
+            {activeInspectorTab === "subtitle" ? (
+              <>
+                <PanelSection title="统一样式">
+                  <div className="subtitle-global-grid">
+                    <label className="field-stack">
+                      <span className="field-label">字体</span>
+                      <select
+                        className="input input--full"
+                        value={subtitleFontFamily}
+                        onChange={(event) => applySubtitleFontFamilyToAll(event.target.value)}
+                        disabled={subtitleClips.length === 0}
+                      >
+                        {availableSubtitleFonts.map((font) => (
+                          <option key={font} value={font}>
+                            {font}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="field-stack">
+                      <span className="field-label">字号</span>
+                      <input
+                        className="input"
+                        type="number"
+                        min={12}
+                        step={1}
+                        value={subtitleFontSize}
+                        onChange={(event) => applySubtitleFontSizeToAll(Number(event.target.value))}
+                        disabled={subtitleClips.length === 0}
+                      />
+                    </label>
+
+                    <div className="button-row">
+                      <button className="btn btn--primary" onClick={onAddSubtitleClip}>
+                        新增字幕
+                      </button>
+                    </div>
+                  </div>
+                </PanelSection>
+
+                <PanelSection title="字幕编辑" meta={`${subtitleClips.length} 条`}>
+                  {subtitleClips.length === 0 ? (
+                    <div className="pane-empty">
+                      <strong>还没有字幕片段</strong>
+                      <span>可以手动新增，或在 WebGAL 导入时勾选字幕一起进入时间线。</span>
+                    </div>
+                  ) : (
+                    <div className="subtitle-list">
+                      {subtitleClips.map((clip, index) => (
+                        <article key={clip.id} className="subtitle-card">
+                          <div className="subtitle-card-header">
+                            <strong>{clip.name || `字幕 ${index + 1}`}</strong>
+                            <button className="btn btn--quiet" onClick={() => onRemoveSubtitleClip(clip.id)}>
+                              删除
+                            </button>
+                          </div>
+
+                          <label className="field-stack">
+                            <span className="field-label">字幕文本</span>
+                            <textarea
+                              className="input subtitle-textarea"
+                              value={clip.subtitleText}
+                              rows={3}
+                              onChange={(event) => onUpdateSubtitleClip(clip.id, { subtitleText: event.target.value })}
+                            />
+                          </label>
+
+                          <div className="subtitle-editor-grid">
+                            <label className="field-stack">
+                              <span className="field-label">颜色</span>
+                              <input
+                                className="input input--color"
+                                type="color"
+                                value={clip.textColor}
+                                onChange={(event) => onUpdateSubtitleClip(clip.id, { textColor: event.target.value })}
+                              />
+                            </label>
+                            <label className="field-stack">
+                              <span className="field-label">开始</span>
+                              <input
+                                className="input"
+                                type="number"
+                                min={0}
+                                step={0.1}
+                                value={clip.start}
+                                disabled={Boolean(clip.linkedAudioClipId)}
+                                onChange={(event) =>
+                                  onUpdateSubtitleClip(clip.id, {
+                                    start: Math.max(0, Number(event.target.value) || 0),
+                                  })
+                                }
+                              />
+                            </label>
+                            <label className="field-stack">
+                              <span className="field-label">时长</span>
+                              <input
+                                className="input"
+                                type="number"
+                                min={0.1}
+                                step={0.1}
+                                value={clip.duration}
+                                disabled={Boolean(clip.linkedAudioClipId)}
+                                onChange={(event) =>
+                                  onUpdateSubtitleClip(clip.id, {
+                                    duration: Math.max(0.1, Number(event.target.value) || 0.1),
+                                  })
+                                }
+                              />
+                            </label>
+                            {clip.linkedAudioClipId ? (
+                              <div className="field-stack subtitle-linked-note">
+                                <span className="field-label">对齐状态</span>
+                                <strong>跟随音频轨</strong>
+                              </div>
+                            ) : null}
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  )}
                 </PanelSection>
               </>
             ) : null}

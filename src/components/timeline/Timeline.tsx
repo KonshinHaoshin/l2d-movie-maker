@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Clip, TrackKind } from "./types";
+import type { Clip, SubtitleClip, TrackKind } from "./clipTypes";
 
 type Props = {
   motionClips: Clip[];
   exprClips: Clip[];
   audioClips: Clip[];
+  subtitleClips: SubtitleClip[];
   playheadSec: number;
   playheadSourceRef?: { current: number };
   pixelsPerSec?: number;
@@ -35,12 +36,14 @@ const trackConfig: Record<TrackKind, { label: string; sublabel: string; color: s
   motion: { label: "动作轨", sublabel: "Motion", color: "#6b7aff" },
   expr: { label: "表情轨", sublabel: "Expression", color: "#2fa38d" },
   audio: { label: "音频轨", sublabel: "Audio", color: "#d7863f" },
+  subtitle: { label: "字幕轨", sublabel: "Subtitle", color: "#c96a6a" },
 };
 
 export default function Timeline({
   motionClips,
   exprClips,
   audioClips,
+  subtitleClips,
   playheadSec,
   playheadSourceRef,
   pixelsPerSec,
@@ -69,12 +72,13 @@ export default function Timeline({
         motionClips.reduce((time, clip) => Math.max(time, clip.start + clip.duration), 0),
         exprClips.reduce((time, clip) => Math.max(time, clip.start + clip.duration), 0),
         audioClips.reduce((time, clip) => Math.max(time, clip.start + clip.duration), 0),
+        subtitleClips.reduce((time, clip) => Math.max(time, clip.start + clip.duration), 0),
         0,
       ),
-    [motionClips, exprClips, audioClips],
+    [motionClips, exprClips, audioClips, subtitleClips],
   );
 
-  const hasClips = motionClips.length > 0 || exprClips.length > 0 || audioClips.length > 0;
+  const hasClips = motionClips.length > 0 || exprClips.length > 0 || audioClips.length > 0 || subtitleClips.length > 0;
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const timeAreaRef = useRef<HTMLDivElement | null>(null);
   const playheadLineRef = useRef<HTMLDivElement | null>(null);
@@ -382,6 +386,10 @@ export default function Timeline({
             <strong>{trackConfig.audio.label}</strong>
             <span>{trackConfig.audio.sublabel}</span>
           </div>
+          <div className="tl-side-cell">
+            <strong>{trackConfig.subtitle.label}</strong>
+            <span>{trackConfig.subtitle.sublabel}</span>
+          </div>
         </div>
 
         <div className="tl-timearea" ref={timeAreaRef}>
@@ -392,6 +400,7 @@ export default function Timeline({
                 <Track clips={motionClips} track="motion" />
                 <Track clips={exprClips} track="expr" />
                 <Track clips={audioClips} track="audio" />
+                <Track clips={subtitleClips} track="subtitle" />
                 <div ref={playheadLineRef} className="tl-playhead-global" style={{ left: 0, transform: `translateX(${playheadSec * pps}px)` }} />
               </>
             ) : (

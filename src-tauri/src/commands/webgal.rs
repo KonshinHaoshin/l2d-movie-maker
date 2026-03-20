@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::collections::BTreeSet;
 
 use serde::Serialize;
 
@@ -88,4 +89,22 @@ pub fn validate_webgal_project_dir(path: String) -> Result<WebGALProjectValidati
     }
 
     Err("所选目录缺少 game/figure；请选择项目根目录，或直接选择 game 目录".to_string())
+}
+
+#[tauri::command]
+pub fn list_system_font_families() -> Result<Vec<String>, String> {
+    let mut database = fontdb::Database::new();
+    database.load_system_fonts();
+
+    let mut families = BTreeSet::new();
+    for face in database.faces() {
+        for (family_name, _) in &face.families {
+            let trimmed = family_name.trim();
+            if !trimmed.is_empty() {
+                families.insert(trimmed.to_string());
+            }
+        }
+    }
+
+    Ok(families.into_iter().collect())
 }

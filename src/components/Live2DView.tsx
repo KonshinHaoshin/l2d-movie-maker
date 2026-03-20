@@ -3,7 +3,7 @@ import { startTransition, useEffect, useRef, useState } from "react";
 import * as PIXI from "pixi.js";
 import { Live2DModel } from "pixi-live2d-display";
 import Timeline from "./timeline/Timeline";
-import type { Clip, TrackKind } from "./timeline/types";
+import type { Clip, SubtitleClip, TrackKind } from "./timeline/clipTypes";
 import { parseMtn } from "../utils/parseMtn";
 import "./Live2DView.css";
 import ControlPanel, { type InspectorTab } from "./panel/ControlPanel";
@@ -47,6 +47,9 @@ type RendererWithBackground = PIXI.Renderer & {
 };
 const PLAYHEAD_UI_INTERVAL_MS = 1000 / 30;
 const EXPORT_PROGRESS_UI_INTERVAL_MS = 100;
+const DEFAULT_SUBTITLE_FONT_FAMILY = "Microsoft YaHei";
+const DEFAULT_SUBTITLE_FONT_SIZE = 34;
+const DEFAULT_SUBTITLE_TEXT_COLOR = "#ffffff";
 
 declare global {
   interface Window {
@@ -61,6 +64,7 @@ export default function Live2DView() {
   // ????????????????
   const modelRef = useRef<Live2DModel | Live2DModel[] | null>(null);
   const appRef = useRef<PIXI.Application | null>(null);
+  const subtitleTextRef = useRef<PIXI.Text | null>(null);
 
   // ????jsonl?????????MTN ??????
   const groupContainerRef = useRef<PIXI.Container | null>(null);
@@ -87,6 +91,7 @@ export default function Live2DView() {
   const [motionClips, setMotionClips] = useState<Clip[]>([]);
   const [exprClips, setExprClips] = useState<Clip[]>([]);
   const [audioClips, setAudioClips] = useState<Clip[]>([]); // ??????
+  const [subtitleClips, setSubtitleClips] = useState<SubtitleClip[]>([]);
   const [playhead, setPlayhead] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentAudioLevel, setCurrentAudioLevel] = useState(0); // ??????
@@ -101,6 +106,7 @@ export default function Live2DView() {
   const playheadUiLastTsRef = useRef<number | null>(null);
   const activeMotionClipIdRef = useRef<string | null>(null);
   const activeExprClipIdRef = useRef<string | null>(null);
+  const activeSubtitleSignatureRef = useRef<string>("");
 
   // ????????
   const [motionDur, setMotionDur] = useState(2);
@@ -254,9 +260,33 @@ export default function Live2DView() {
   // ????????
   const nextEnd = (clips: Clip[]) => clips.reduce((t, c) => Math.max(t, c.start + c.duration), 0);
 
+  const buildSubtitleClipName = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return "新字幕";
+    return trimmed.length > 18 ? `${trimmed.slice(0, 18)}...` : trimmed;
+  };
+
+  const createSubtitleClip = (
+    text: string,
+    start: number,
+    duration: number,
+    options: { linkedAudioClipId?: string } = {},
+  ): SubtitleClip => ({
+    id: crypto.randomUUID(),
+    name: buildSubtitleClipName(text),
+    start,
+    duration,
+    subtitleText: text,
+    fontFamily: DEFAULT_SUBTITLE_FONT_FAMILY,
+    fontSize: DEFAULT_SUBTITLE_FONT_SIZE,
+    textColor: DEFAULT_SUBTITLE_TEXT_COLOR,
+    linkedAudioClipId: options.linkedAudioClipId,
+  });
+
   const resetTimelineTriggerState = () => {
     activeMotionClipIdRef.current = null;
     activeExprClipIdRef.current = null;
+    activeSubtitleSignatureRef.current = "";
   };
 
   const findActiveClip = (clips: Clip[], timeSec: number): Clip | null => {
@@ -269,14 +299,72 @@ export default function Live2DView() {
     return null;
   };
 
+  const syncSubtitleDisplayLayout = () => {
+    const app = appRef.current;
+    const subtitleText = subtitleTextRef.current;
+    if (!app || !subtitleText) return;
+
+    subtitleText.position.set(app.screen.width / 2, app.screen.height - 36);
+    subtitleText.style.wordWrap = true;
+    subtitleText.style.wordWrapWidth = Math.max(320, app.screen.width - 140);
+  };
+
+  const renderSubtitleClip = (clip: SubtitleClip | null) => {
+    const subtitleText = subtitleTextRef.current;
+    if (!subtitleText) return;
+
+    if (!clip || !clip.subtitleText.trim()) {
+      subtitleText.visible = false;
+      subtitleText.text = "";
+      activeSubtitleSignatureRef.current = "";
+      return;
+    }
+
+    const signature = [
+      clip.id,
+      clip.subtitleText,
+      clip.fontFamily,
+      clip.fontSize,
+      clip.textColor,
+    ].join("|");
+
+    if (activeSubtitleSignatureRef.current === signature && subtitleText.visible) {
+      return;
+    }
+
+    subtitleText.visible = true;
+    subtitleText.text = clip.subtitleText;
+    subtitleText.style = new PIXI.TextStyle({
+      fontFamily: clip.fontFamily || DEFAULT_SUBTITLE_FONT_FAMILY,
+      fontSize: Math.max(12, clip.fontSize || DEFAULT_SUBTITLE_FONT_SIZE),
+      fontWeight: "700",
+      fill: clip.textColor || DEFAULT_SUBTITLE_TEXT_COLOR,
+      align: "center",
+      stroke: "#081018",
+      strokeThickness: 6,
+      lineJoin: "round",
+      dropShadow: true,
+      dropShadowColor: "#000000",
+      dropShadowBlur: 4,
+      dropShadowDistance: 2,
+      wordWrap: true,
+      wordWrapWidth: Math.max(320, (appRef.current?.screen.width ?? 1280) - 140),
+      breakWords: true,
+    });
+    activeSubtitleSignatureRef.current = signature;
+    syncSubtitleDisplayLayout();
+  };
+
   const clearTimeline = () => { 
     setMotionClips([]); 
     setExprClips([]); 
     setAudioClips([]); 
+    setSubtitleClips([]);
     playheadRef.current = 0;
     playheadUiLastTsRef.current = null;
     setPlayhead(0); 
     resetTimelineTriggerState();
+    renderSubtitleClip(null);
     
     // ??????
     audioManager.cleanupAudio();
@@ -285,7 +373,51 @@ export default function Live2DView() {
   const changeClip = (track: TrackKind, id: string, patch: Partial<Pick<Clip, "start" | "duration">>) => {
     if (track === "motion") setMotionClips(prev => prev.map(c => (c.id === id ? { ...c, ...patch } : c)));
     else if (track === "expr") setExprClips(prev => prev.map(c => (c.id === id ? { ...c, ...patch } : c)));
-    else if (track === "audio") setAudioClips(prev => prev.map(c => (c.id === id ? { ...c, ...patch } : c)));
+    else if (track === "audio") {
+      setAudioClips(prev => prev.map(c => (c.id === id ? { ...c, ...patch } : c)));
+      setSubtitleClips(prev =>
+        prev.map((clip) => (
+          clip.linkedAudioClipId === id
+            ? {
+                ...clip,
+                ...patch,
+              }
+            : clip
+        )),
+      );
+    }
+    else if (track === "subtitle") setSubtitleClips(prev => prev.map(c => (c.id === id ? { ...c, ...patch } : c)));
+  };
+
+  const addSubtitleClip = () => {
+    const start = Math.max(timelineLength, nextEnd(subtitleClips));
+    const duration = Math.max(0.5, exprDur || motionDur || 2);
+    setSubtitleClips((prev) => [...prev, createSubtitleClip("新字幕", start, duration)]);
+  };
+
+  const updateSubtitleClip = (
+    id: string,
+    patch: Partial<Pick<SubtitleClip, "subtitleText" | "fontFamily" | "fontSize" | "textColor" | "start" | "duration">>,
+  ) => {
+    setSubtitleClips((prev) =>
+      prev.map((clip) => {
+        if (clip.id !== id) return clip;
+        const nextText = typeof patch.subtitleText === "string" ? patch.subtitleText : clip.subtitleText;
+        return {
+          ...clip,
+          ...patch,
+          subtitleText: nextText,
+          name: buildSubtitleClipName(nextText),
+          fontSize: Math.max(12, Number(patch.fontSize ?? clip.fontSize) || DEFAULT_SUBTITLE_FONT_SIZE),
+          duration: Math.max(0.1, Number(patch.duration ?? clip.duration) || clip.duration),
+          start: Math.max(0, Number(patch.start ?? clip.start) || 0),
+        };
+      }),
+    );
+  };
+
+  const removeSubtitleClip = (id: string) => {
+    setSubtitleClips((prev) => prev.filter((clip) => clip.id !== id));
   };
 
   const setPlayheadSec = (sec: number) => {
@@ -388,7 +520,7 @@ export default function Live2DView() {
     }
   };
 
-  const timelineLength = Math.max(nextEnd(motionClips), nextEnd(exprClips), nextEnd(audioClips));
+  const timelineLength = Math.max(nextEnd(motionClips), nextEnd(exprClips), nextEnd(audioClips), nextEnd(subtitleClips));
 
   const applyTimelineAtTime = (t: number, offline: boolean = false) => {
     const activeMotionClip = findActiveClip(motionClips, t);
@@ -410,6 +542,8 @@ export default function Live2DView() {
     } else {
       activeExprClipIdRef.current = null;
     }
+
+    renderSubtitleClip(findActiveClip(subtitleClips, t) as SubtitleClip | null);
 
     if (!offline) {
       // ??????????
@@ -549,6 +683,7 @@ export default function Live2DView() {
       motionClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
       exprClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
       audioClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
+      subtitleClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
       0
     );
 
@@ -795,6 +930,7 @@ export default function Live2DView() {
       const nextMotionClips: Clip[] = [];
       const nextExprClips: Clip[] = [];
       const nextAudioClips: Clip[] = [];
+      const nextSubtitleClips: SubtitleClip[] = [];
       let timelineCursor = 0;
 
       for (const group of plan.groups) {
@@ -823,6 +959,8 @@ export default function Live2DView() {
           });
         }
 
+        let linkedAudioClipId: string | undefined;
+
         if (group.audioAbsolutePath) {
           const clipId = crypto.randomUUID();
           const audioUrl = await buildWebGALExternalAssetUrl(plan.projectRoot, group.audioAbsolutePath);
@@ -835,6 +973,15 @@ export default function Live2DView() {
             audioUrl,
             audioPath: group.audioAbsolutePath,
           });
+          linkedAudioClipId = clipId;
+        }
+
+        if (plan.includeSubtitles && group.text?.trim()) {
+          nextSubtitleClips.push(
+            createSubtitleClip(group.text.trim(), timelineCursor, duration, {
+              linkedAudioClipId,
+            }),
+          );
         }
 
         timelineCursor += duration;
@@ -843,6 +990,7 @@ export default function Live2DView() {
       setMotionClips(nextMotionClips);
       setExprClips(nextExprClips);
       setAudioClips(nextAudioClips);
+      setSubtitleClips(nextSubtitleClips);
       setExternalModelDisplayName(`${plan.selectedRoleLabel} · ${plan.selectedFigurePath}`);
       playheadRef.current = 0;
       playheadUiLastTsRef.current = null;
@@ -964,6 +1112,26 @@ export default function Live2DView() {
       (app.view as HTMLCanvasElement).className = "live2d-canvas";
       canvasRef.current = app.view as HTMLCanvasElement;
       appRef.current = app;
+      app.stage.sortableChildren = true;
+
+      const subtitleText = new PIXI.Text("", {
+        fontFamily: DEFAULT_SUBTITLE_FONT_FAMILY,
+        fontSize: DEFAULT_SUBTITLE_FONT_SIZE,
+        fontWeight: "700",
+        fill: DEFAULT_SUBTITLE_TEXT_COLOR,
+        align: "center",
+        stroke: "#081018",
+        strokeThickness: 6,
+        lineJoin: "round",
+        wordWrap: true,
+        wordWrapWidth: Math.max(320, app.screen.width - 140),
+      });
+      subtitleText.anchor.set(0.5, 1);
+      subtitleText.visible = false;
+      subtitleText.zIndex = 10_000;
+      app.stage.addChild(subtitleText);
+      subtitleTextRef.current = subtitleText;
+      syncSubtitleDisplayLayout();
 
       setRendererBackgroundMode(app.renderer as RendererWithBackground, transparentBg);
 
@@ -980,6 +1148,7 @@ export default function Live2DView() {
         } else if (modelRef.current && !Array.isArray(modelRef.current)) {
           modelRef.current.position.set(appRef.current.screen.width / 2, appRef.current.screen.height / 2);
         }
+        syncSubtitleDisplayLayout();
       };
       window.addEventListener("resize", resizeHandler);
     };
@@ -997,6 +1166,7 @@ export default function Live2DView() {
         } catch {}
         appRef.current = null;
       }
+      subtitleTextRef.current = null;
       modelRef.current = null;
       groupContainerRef.current = null;
     };
@@ -1009,6 +1179,11 @@ export default function Live2DView() {
       setRendererBackgroundMode(appRef.current.renderer as RendererWithBackground, transparentBg);
     }
   }, [transparentBg]);
+
+  useEffect(() => {
+    if (isPlaying) return;
+    renderSubtitleClip(findActiveClip(subtitleClips, playhead) as SubtitleClip | null);
+  }, [subtitleClips, playhead, isPlaying]);
 
   // ??????????
   useEffect(() => {
@@ -1173,6 +1348,10 @@ export default function Live2DView() {
     addMotionClip,
     addExprClip,
     addAudioClip,
+    subtitleClips,
+    onAddSubtitleClip: addSubtitleClip,
+    onUpdateSubtitleClip: updateSubtitleClip,
+    onRemoveSubtitleClip: removeSubtitleClip,
     characterOptions,
     selectedCharacterId,
     onSelectCharacter: setSelectedCharacterId,
@@ -1325,6 +1504,7 @@ export default function Live2DView() {
           motionClips={motionClips}
           exprClips={exprClips}
           audioClips={audioClips}
+          subtitleClips={subtitleClips}
           playheadSec={playhead}
           playheadSourceRef={playheadRef}
           onChangeClip={changeClip}
@@ -1333,6 +1513,11 @@ export default function Live2DView() {
             else if (track === "expr") setExprClips(prev => prev.filter(c => c.id !== id));
             else if (track === "audio") {
               setAudioClips(prev => prev.filter(c => c.id !== id));
+              setSubtitleClips(prev => prev.map((clip) => (
+                clip.linkedAudioClipId === id
+                  ? { ...clip, linkedAudioClipId: undefined }
+                  : clip
+              )));
               const audio = audioManager.audioRefs.current.get(id);
               if (audio) {
                 audio.pause();
@@ -1347,6 +1532,8 @@ export default function Live2DView() {
                 } catch {}
                 audioManager.audioAnalyzersRef.current.delete(id);
               }
+            } else if (track === "subtitle") {
+              removeSubtitleClip(id);
             }
           }}
           onSetPlayhead={setPlayheadSec}

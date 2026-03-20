@@ -538,6 +538,33 @@
   line-height: 1.4;
 }
 
+.webgal-toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid rgba(87, 108, 131, 0.24);
+  border-radius: 12px;
+  background: rgba(24, 33, 43, 0.7);
+}
+
+.webgal-toggle-row input {
+  margin-top: 2px;
+}
+
+.webgal-toggle-row span {
+  display: grid;
+  gap: 4px;
+  color: var(--wg-text);
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.webgal-toggle-row small {
+  color: var(--wg-text-dim);
+  font-size: 0.76rem;
+}
+
 .webgal-import-panel {
   overflow: hidden;
 }

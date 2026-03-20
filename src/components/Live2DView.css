@@ -237,7 +237,7 @@
 
 .inspector-tabs {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 6px;
   padding: 0 14px 14px;
   border-bottom: 1px solid rgba(70, 86, 106, 0.25);
@@ -507,6 +507,74 @@
   min-height: 28px;
   padding-inline: 10px;
   font-size: 0.76rem;
+}
+
+.subtitle-list {
+  display: grid;
+  gap: 10px;
+}
+
+.subtitle-global-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.subtitle-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(76, 92, 111, 0.26);
+  border-radius: 12px;
+  background: rgba(24, 33, 43, 0.84);
+}
+
+.subtitle-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.subtitle-card-header strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subtitle-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.subtitle-linked-note {
+  justify-content: end;
+}
+
+.subtitle-linked-note strong {
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.subtitle-textarea {
+  min-height: 92px;
+  resize: vertical;
+  line-height: 1.6;
+}
+
+.input--color {
+  min-height: 40px;
+  padding: 4px;
+}
+
+@media (max-width: 1500px) {
+  .subtitle-global-grid {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
 }
 
 .library-duration-inline {
