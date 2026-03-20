@@ -37,7 +37,6 @@ interface ModelData {
 type MotionLenMap = Record<string, number>;
 type CharacterOption = { id: string; label: string };
 type CharacterTransform = { x: number; y: number; scaleX: number; scaleY: number; rotation: number };
-type ToolbarAction = "play" | "stop" | "record" | "record-stop";
 type TransformTarget = Pick<PIXI.Container, "position" | "scale" | "rotation" | "getBounds">;
 type BoundsTarget = Pick<Live2DModel, "width" | "height" | "position" | "scale" | "getBounds" | "getLocalBounds">;
 type RendererWithBackground = PIXI.Renderer & {
@@ -1146,19 +1145,6 @@ export default function Live2DView() {
       ? (selectedModelParts[selectedModelParts.length - 2] ?? selectedModel)
       : "未加载模型"
   );
-  const selectedCharacterLabel =
-    characterOptions.find((option) => option.id === selectedCharacterId)?.label ??
-    characterOptions[0]?.label ??
-    "主角色";
-
-  const toolbarAction: ToolbarAction = isPlaying
-    ? "stop"
-    : recState === "rec"
-      ? "record-stop"
-      : blob
-        ? "play"
-        : "record";
-
   const panelProps = {
     onToggleWebGALMode: () => setShowWebGALMode(true),
     modelList,
@@ -1272,11 +1258,6 @@ export default function Live2DView() {
           </div>
         </div>
 
-        <div className="editor-topbar-status">
-          <span>{selectedModelDisplayName}</span>
-          <span>角色 {selectedCharacterLabel}</span>
-          <span>状态 {toolbarAction === "record-stop" ? "录制中" : toolbarAction === "stop" ? "播放中" : "待机"}</span>
-        </div>
       </header>
 
       <div className="editor-workspace">
@@ -1296,7 +1277,6 @@ export default function Live2DView() {
               </div>
               <div className="monitor-meta">
                 <span>{transparentBg ? "透明背景" : "实色背景"}</span>
-                <span>角色 {selectedCharacterLabel}</span>
                 <span>时间线 {timelineLength.toFixed(2)} 秒</span>
               </div>
             </div>
