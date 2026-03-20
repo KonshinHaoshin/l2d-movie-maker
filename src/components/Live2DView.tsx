@@ -21,6 +21,7 @@ import { writeFile } from "@tauri-apps/plugin-fs";
 import { isVp9AlphaSupported } from "../utils/recorder";
 import { runOfflineWebMExport } from "../utils/offlineExporter";
 import {
+  buildWebGALExternalAssetUrl,
   loadWebGALMotionDurations,
   resolveFigureAbsolutePath,
   type WebGALImportPlan,
@@ -334,6 +335,7 @@ export default function Live2DView() {
 
       const audioUrl = convertFileSrc(audioPath);
       const audio = new Audio(audioUrl);
+      audio.crossOrigin = "anonymous";
       await new Promise((resolve, reject) => {
         audio.onloadedmetadata = resolve;
         audio.onerror = reject;
@@ -359,6 +361,7 @@ export default function Live2DView() {
       };
 
       const audioElement = new Audio(audioUrl);
+      audioElement.crossOrigin = "anonymous";
       audioElement.preload = 'auto';
       audioElement.volume = 0.8;
       audioManager.audioRefs.current.set(audioClip.id, audioElement);
@@ -728,6 +731,7 @@ export default function Live2DView() {
 
   const createImportedAudioElement = (clipId: string, audioUrl: string) => {
     const audioElement = new Audio(audioUrl);
+    audioElement.crossOrigin = "anonymous";
     audioElement.preload = "auto";
     audioElement.volume = 0.8;
     audioManager.audioRefs.current.set(clipId, audioElement);
@@ -770,7 +774,7 @@ export default function Live2DView() {
       audioManager.initAudioContext();
 
       const absoluteFigurePath = await resolveFigureAbsolutePath(plan.projectRoot, plan.selectedFigurePath);
-      const figureUrl = convertFileSrc(absoluteFigurePath);
+      const figureUrl = await buildWebGALExternalAssetUrl(plan.projectRoot, absoluteFigurePath);
 
       if (modelManager) {
         modelManager.cleanupCurrentModel();
@@ -822,7 +826,7 @@ export default function Live2DView() {
 
         if (group.audioAbsolutePath) {
           const clipId = crypto.randomUUID();
-          const audioUrl = convertFileSrc(group.audioAbsolutePath);
+          const audioUrl = await buildWebGALExternalAssetUrl(plan.projectRoot, group.audioAbsolutePath);
           createImportedAudioElement(clipId, audioUrl);
           nextAudioClips.push({
             id: clipId,
