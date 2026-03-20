@@ -48,8 +48,27 @@ function areMapsEqual(left: Record<string, string>, right: Record<string, string
   return true;
 }
 
-function formatSeconds(value: number): string {
-  return `${value.toFixed(2)} 秒`;
+function stringifyRoleNameMap(roleNameMap: WebGALRoleNameMap): string {
+  return JSON.stringify(roleNameMap, null, 2);
+}
+
+function parseRoleNameMapEditor(value: string): WebGALRoleNameMap {
+  const trimmed = value.trim();
+  if (!trimmed) return {};
+
+  const parsed = JSON.parse(trimmed) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("角色映射表必须是 JSON 对象");
+  }
+
+  const next: WebGALRoleNameMap = {};
+  for (const [key, rawValue] of Object.entries(parsed)) {
+    const roleId = key.trim();
+    const roleName = typeof rawValue === "string" ? rawValue.trim() : "";
+    if (!roleId || !roleName) continue;
+    next[roleId] = roleName;
+  }
+  return next;
 }
 
 export default function WebGALMode({
@@ -75,6 +94,9 @@ export default function WebGALMode({
   const [isImporting, setIsImporting] = useState(false);
   const [isProjectReady, setIsProjectReady] = useState(false);
   const [hasRestoredProject, setHasRestoredProject] = useState(false);
+  const [showRoleMappings, setShowRoleMappings] = useState(false);
+  const [roleMappingEditorText, setRoleMappingEditorText] = useState("{}");
+  const [roleMappingEditorError, setRoleMappingEditorError] = useState("");
 
   const parserStateLabel = error
     ? "解析异常"
@@ -267,6 +289,13 @@ export default function WebGALMode({
   }, [projectRoot, selectedRoleId, roleNameMap, audioRoot]);
 
   useEffect(() => {
+    if (showRoleMappings) {
+      setRoleMappingEditorText(stringifyRoleNameMap(roleNameMap));
+      setRoleMappingEditorError("");
+    }
+  }, [showRoleMappings, roleNameMap]);
+
+  useEffect(() => {
     if (!selectedRoleSummary) {
       setSelectedFigurePath("");
       return;
@@ -391,8 +420,7 @@ export default function WebGALMode({
     setIsProjectReady(false);
   };
 
-  const handleRoleNameChange = async (roleId: string, label: string) => {
-    const nextRoleNameMap = mergeRoleNameMaps(roleNameMap, { [roleId]: label });
+  const handleRoleNameMapCommit = async (nextRoleNameMap: WebGALRoleNameMap) => {
     setRoleNameMap(nextRoleNameMap);
     if (projectRoot) {
       await saveWebGALProjectRecord(
@@ -404,6 +432,20 @@ export default function WebGALMode({
         },
         { setAsLastProject: true },
       );
+    }
+  };
+
+  const handleRoleMappingEditorChange = async (nextText: string) => {
+    setRoleMappingEditorText(nextText);
+
+    try {
+      const nextRoleNameMap = parseRoleNameMapEditor(nextText);
+      setRoleMappingEditorError("");
+      if (!areMapsEqual(roleNameMap, nextRoleNameMap)) {
+        await handleRoleNameMapCommit(nextRoleNameMap);
+      }
+    } catch (error) {
+      setRoleMappingEditorError(error instanceof Error ? error.message : String(error));
     }
   };
 
@@ -510,126 +552,62 @@ export default function WebGALMode({
           </aside>
 
           <div className="webgal-main">
-            <div className="webgal-column">
-              <section className="webgal-panel">
-                <div className="webgal-panel-header">
-                  <div>
-                    <div className="webgal-panel-kicker">Project</div>
-                    <h4>项目选择</h4>
-                  </div>
-                  <div className="webgal-toolbar">
-                    <button className="webgal-btn webgal-btn--secondary" onClick={handleSelectProject}>
-                      选择项目
-                    </button>
-                    <button className="webgal-btn webgal-btn--ghost" onClick={handleClearProject} disabled={!projectRoot}>
-                      清除
-                    </button>
-                  </div>
+            <section className="webgal-panel webgal-editor-panel webgal-editor-panel--main">
+              <div className="webgal-panel-header">
+                <div>
+                  <div className="webgal-panel-kicker">Script</div>
+                  <h4>脚本输入</h4>
                 </div>
-
-                <div className="webgal-status-grid">
-                  <div className="webgal-info-card">
-                    <span>当前项目</span>
-                    <strong>{projectName}</strong>
-                  </div>
-                  <div className="webgal-info-card">
-                    <span>Figure 根目录</span>
-                    <strong>{figureRoot || "未选择"}</strong>
-                  </div>
-                  <div className="webgal-info-card">
-                    <span>语音根目录</span>
-                    <strong>{audioRoot || "待自动探测"}</strong>
-                  </div>
+                <div className="webgal-toolbar">
+                  <button className="webgal-btn webgal-btn--secondary" onClick={handleSelectProject}>
+                    选择项目
+                  </button>
+                  <button className="webgal-btn webgal-btn--secondary" onClick={() => setScript(EXAMPLE_SCRIPT)}>
+                    加载示例
+                  </button>
+                  <button className="webgal-btn webgal-btn--ghost" onClick={() => setScript("")}>
+                    清空文本
+                  </button>
+                  <button
+                    className="webgal-btn webgal-btn--primary"
+                    onClick={() => void analyzeScript(script, roleNameMap)}
+                    disabled={!script.trim() || isParsing}
+                  >
+                    {isParsing ? "解析中..." : "立即解析"}
+                  </button>
                 </div>
-              </section>
+              </div>
 
-              <section className="webgal-panel webgal-editor-panel">
-                <div className="webgal-panel-header">
-                  <div>
-                    <div className="webgal-panel-kicker">Script</div>
-                    <h4>脚本输入</h4>
-                  </div>
-                  <div className="webgal-toolbar">
-                    <button className="webgal-btn webgal-btn--secondary" onClick={() => setScript(EXAMPLE_SCRIPT)}>
-                      加载示例
-                    </button>
-                    <button className="webgal-btn webgal-btn--ghost" onClick={() => setScript("")}>
-                      清空文本
-                    </button>
-                    <button
-                      className="webgal-btn webgal-btn--primary"
-                      onClick={() => void analyzeScript(script, roleNameMap)}
-                      disabled={!script.trim() || isParsing}
-                    >
-                      {isParsing ? "解析中..." : "立即解析"}
-                    </button>
-                  </div>
-                </div>
+              <div className="webgal-project-strip">
+                <span className="webgal-project-meta">项目：{isProjectReady ? projectName : "未选择"}</span>
+                <span className="webgal-project-meta">Figure：{figureRoot || "未选择"}</span>
+                <span className="webgal-project-meta">语音：{audioRoot || "待自动探测"}</span>
+                <button className="webgal-project-link" onClick={handleClearProject} disabled={!projectRoot} type="button">
+                  清除项目
+                </button>
+              </div>
 
-                <div className="webgal-editor-meta">
-                  <span className="webgal-tag">对白</span>
-                  <span className="webgal-tag">改模</span>
-                  <span className="webgal-tag">语音</span>
-                  <span className="webgal-tag">figureId</span>
-                </div>
+              <div className="webgal-editor-meta">
+                <span className="webgal-tag">对白</span>
+                <span className="webgal-tag">改模</span>
+                <span className="webgal-tag">语音</span>
+                <span className="webgal-tag">figureId</span>
+              </div>
 
-                <div className="webgal-editor-frame">
-                  <textarea
-                    className="script-input"
-                    value={script}
-                    onChange={(event) => setScript(event.target.value)}
-                    placeholder="先选择项目，再粘贴 WebGAL 脚本。文本变化后会自动解析，并尝试恢复本地角色映射表。"
-                    rows={14}
-                  />
-                </div>
+              <div className="webgal-editor-frame">
+                <textarea
+                  className="script-input"
+                  value={script}
+                  onChange={(event) => setScript(event.target.value)}
+                  placeholder="先选择项目，再粘贴 WebGAL 脚本。文本变化后会自动解析，并尝试恢复本地角色映射表。"
+                  rows={14}
+                />
+              </div>
 
-                <div className="webgal-editor-footer">
-                  <div className="webgal-status-copy">
-                    <strong>{error ? "存在错误" : parsedCommands.length > 0 ? "解析完成" : "等待输入"}</strong>
-                    <span>{error || "当前脚本会自动解析，角色映射和语音根目录也会同步更新。"}</span>
-                  </div>
-                </div>
-              </section>
+            </section>
 
-              <section className="webgal-panel">
-                <div className="webgal-panel-header">
-                  <div>
-                    <div className="webgal-panel-kicker">Mapping</div>
-                    <h4>角色映射表</h4>
-                  </div>
-                  <span className="webgal-panel-note">修改后立即写入本地记录</span>
-                </div>
-
-                {roleSummaries.length > 0 ? (
-                  <div className="webgal-mapping-list">
-                    {roleSummaries.map((summary) => (
-                      <div key={summary.roleId} className="webgal-mapping-row">
-                        <label className="webgal-mapping-field">
-                          <span>figureId</span>
-                          <strong>{summary.roleId}</strong>
-                        </label>
-                        <label className="webgal-mapping-field webgal-mapping-field--grow">
-                          <span>角色名</span>
-                          <input
-                            className="webgal-text-input"
-                            value={roleNameMap[summary.roleId] ?? summary.label}
-                            onChange={(event) => void handleRoleNameChange(summary.roleId, event.target.value)}
-                          />
-                        </label>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="webgal-empty">
-                    <strong>角色映射表会在解析后出现</strong>
-                    <span>脚本里出现的 figureId 和已知说话者会自动合并到本地记录里。</span>
-                  </div>
-                )}
-              </section>
-            </div>
-
-            <div className="webgal-column">
-              <section className="webgal-panel">
+            <div className="webgal-column webgal-column--sidebar">
+              <section className="webgal-panel webgal-panel--compact webgal-import-panel">
                 <div className="webgal-panel-header">
                   <div>
                     <div className="webgal-panel-kicker">Import</div>
@@ -637,7 +615,7 @@ export default function WebGALMode({
                   </div>
                 </div>
 
-                <div className="webgal-status-grid">
+                <div className="webgal-status-grid webgal-status-grid--compact">
                   <div className="webgal-info-card">
                     <span>命令总数</span>
                     <strong>{parsedCommands.length}</strong>
@@ -656,7 +634,7 @@ export default function WebGALMode({
 
                 {roleSummaries.length > 0 ? (
                   <>
-                    <div className="webgal-role-list">
+                    <div className="webgal-role-list webgal-role-list--compact">
                       {roleSummaries.map((summary) => (
                         <button
                           key={summary.roleId}
@@ -677,7 +655,7 @@ export default function WebGALMode({
                       ))}
                     </div>
 
-                    <div className="webgal-inline-grid">
+                    <div className="webgal-inline-grid webgal-inline-grid--compact">
                       <label className="webgal-mapping-field webgal-mapping-field--grow">
                         <span>当前角色</span>
                         <strong>{selectedRoleLabel}</strong>
@@ -711,78 +689,6 @@ export default function WebGALMode({
                 )}
               </section>
 
-              <section className="webgal-panel webgal-preview-panel">
-                <div className="webgal-panel-header">
-                  <div>
-                    <div className="webgal-panel-kicker">Preview</div>
-                    <h4>导入组预览</h4>
-                  </div>
-                  <div className="webgal-preview-meta">
-                    <span>角色 {selectedRoleLabel}</span>
-                    <span>组 {previewGroups.length}</span>
-                  </div>
-                </div>
-
-                {previewGroups.length > 0 ? (
-                  <div className="commands-preview">
-                    {previewGroups.map((group) => (
-                      <div key={`${group.index}-${group.lineNumber}`} className={`command-item ${group.skipReason ? "is-skipped" : ""}`}>
-                        <div className="command-header">
-                          <span className={`command-type ${group.skipReason ? "is-warning" : "is-dialogue"}`}>
-                            {group.skipReason ? "跳过" : "导入组"}
-                          </span>
-                          <span className="command-line">
-                            第 {group.lineNumber} 行 · 起点 {formatSeconds(group.startSec)}
-                          </span>
-                        </div>
-
-                        <div className="command-content">
-                          <div className="command-row">
-                            <span>持续时长</span>
-                            <strong>{formatSeconds(group.durationSec)}</strong>
-                          </div>
-                          <div className="command-row">
-                            <span>动作</span>
-                            <strong>{group.motion || "无"}</strong>
-                          </div>
-                          <div className="command-row">
-                            <span>表情</span>
-                            <strong>{group.expression || "无"}</strong>
-                          </div>
-                          <div className="command-row">
-                            <span>立绘</span>
-                            <strong>{group.figurePath || selectedFigurePath || "未指定"}</strong>
-                          </div>
-                          <div className="command-row">
-                            <span>语音</span>
-                            <strong>{group.audioRelativePath || "无"}</strong>
-                          </div>
-                          {group.speaker || group.text ? (
-                            <div className="command-block">
-                              <span>对白</span>
-                              <p>
-                                {group.speaker ? `${group.speaker}: ` : ""}
-                                {group.text || "无文本"}
-                              </p>
-                            </div>
-                          ) : null}
-                          {group.skipReason ? (
-                            <div className="command-row">
-                              <span>跳过原因</span>
-                              <strong>{group.skipReason}</strong>
-                            </div>
-                          ) : null}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="webgal-empty">
-                    <strong>这里会显示导入组</strong>
-                    <span>选择项目并解析脚本后，系统会按当前角色生成动作、表情、语音分组预览。</span>
-                  </div>
-                )}
-              </section>
             </div>
           </div>
         </div>
@@ -793,6 +699,13 @@ export default function WebGALMode({
             <span>当前会替换现有三轨内容，并把选定立绘加载到预览区。语音优先决定组时长，没有语音时按动作时长回退。</span>
           </div>
           <div className="webgal-actions-buttons">
+            <button
+              className="webgal-btn webgal-btn--ghost"
+              onClick={() => setShowRoleMappings(true)}
+              type="button"
+            >
+              角色映射表
+            </button>
             <button className="webgal-btn webgal-btn--ghost" onClick={onClose}>
               取消
             </button>
@@ -805,6 +718,43 @@ export default function WebGALMode({
             </button>
           </div>
         </div>
+
+        {showRoleMappings ? (
+          <div className="webgal-drawer-layer" onClick={() => setShowRoleMappings(false)}>
+            <aside className="webgal-drawer" onClick={(event) => event.stopPropagation()}>
+              <div className="webgal-panel-header">
+                <div>
+                  <div className="webgal-panel-kicker">Mapping</div>
+                  <h4>角色映射表</h4>
+                </div>
+                <button className="webgal-icon-btn" onClick={() => setShowRoleMappings(false)} aria-label="关闭角色映射表">
+                  ×
+                </button>
+              </div>
+
+              <p className="webgal-drawer-copy">这里直接编辑完整 JSON。格式示例：{"{"}"anon": "千早爱音"{"}"}，内容合法时会立即写入本地记录。</p>
+
+              <div className="webgal-json-editor-shell">
+                <textarea
+                  className="webgal-json-editor"
+                  value={roleMappingEditorText}
+                  onChange={(event) => void handleRoleMappingEditorChange(event.target.value)}
+                  spellCheck={false}
+                />
+              </div>
+
+              <div className="webgal-drawer-status">
+                <span className={`webgal-chip webgal-chip--state ${roleMappingEditorError ? "is-error" : "is-ready"}`}>
+                  {roleMappingEditorError ? "JSON 无效" : "JSON 有效"}
+                </span>
+                <span className="webgal-drawer-meta">当前映射 {Object.keys(roleNameMap).length} 项</span>
+              </div>
+              {roleMappingEditorError ? (
+                <p className="webgal-drawer-error">{roleMappingEditorError}</p>
+              ) : null}
+            </aside>
+          </div>
+        ) : null}
       </div>
     </div>
   );

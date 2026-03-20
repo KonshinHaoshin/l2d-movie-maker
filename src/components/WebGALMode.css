@@ -34,6 +34,7 @@
   height: min(860px, calc(100vh - 36px));
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
+  position: relative;
   overflow: hidden;
   border: 1px solid var(--wg-line);
   border-radius: 24px;
@@ -202,9 +203,14 @@
   gap: 14px;
 }
 
+.webgal-sidebar > .webgal-panel,
+.webgal-import-panel {
+  flex: 1 1 0;
+}
+
 .webgal-main {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(360px, 0.9fr);
+  grid-template-columns: minmax(0, 1.45fr) minmax(340px, 0.85fr);
   gap: 14px;
 }
 
@@ -241,10 +247,19 @@
   gap: 14px;
 }
 
+.webgal-column--sidebar {
+  overflow: hidden;
+}
+
 .webgal-status-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
+}
+
+.webgal-status-grid--compact {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
 }
 
 .webgal-info-card {
@@ -272,6 +287,30 @@
   word-break: break-word;
 }
 
+.webgal-panel--compact {
+  gap: 10px;
+  padding: 13px;
+}
+
+.webgal-panel--compact .webgal-panel-header h4 {
+  font-size: 0.94rem;
+}
+
+.webgal-panel--compact .webgal-info-card {
+  gap: 3px;
+  padding: 9px 10px;
+  border-radius: 12px;
+}
+
+.webgal-panel--compact .webgal-info-card span {
+  font-size: 0.72rem;
+}
+
+.webgal-panel--compact .webgal-info-card strong {
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
 .webgal-panel-note {
   align-self: center;
 }
@@ -283,6 +322,8 @@
   display: grid;
   gap: 10px;
   line-height: 1.6;
+  align-content: start;
+  flex: 1 1 auto;
 }
 
 .command-item,
@@ -314,6 +355,40 @@
 .webgal-editor-panel,
 .webgal-preview-panel {
   min-height: 0;
+}
+
+.webgal-editor-panel--main {
+  overflow: hidden;
+}
+
+.webgal-project-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 2px 2px 0;
+}
+
+.webgal-project-meta {
+  color: var(--wg-text-dim);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.webgal-project-link {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--wg-accent-soft);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.webgal-project-link:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .webgal-editor-meta {
@@ -421,6 +496,52 @@
   font-size: 0.8rem;
 }
 
+.webgal-role-list--compact {
+  min-height: 0;
+  flex: 1 1 auto;
+  max-height: none;
+  gap: 8px;
+  padding-right: 4px;
+}
+
+.webgal-role-list--compact .webgal-role-card {
+  gap: 6px;
+  padding: 10px 11px;
+  border-radius: 12px;
+}
+
+.webgal-role-list--compact .webgal-role-copy strong {
+  font-size: 0.9rem;
+}
+
+.webgal-role-list--compact .webgal-role-copy span,
+.webgal-role-list--compact .webgal-role-stats span {
+  font-size: 0.73rem;
+}
+
+.webgal-inline-grid--compact {
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.webgal-inline-grid--compact .webgal-mapping-field {
+  padding: 9px 10px;
+  gap: 4px;
+}
+
+.webgal-inline-grid--compact .webgal-mapping-field span {
+  font-size: 0.72rem;
+}
+
+.webgal-inline-grid--compact .webgal-mapping-field strong {
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+
+.webgal-import-panel {
+  overflow: hidden;
+}
+
 .webgal-inline-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -483,6 +604,11 @@
 .webgal-preview-meta {
   color: var(--wg-text-dim);
   font-size: 0.8rem;
+}
+
+.webgal-preview-panel {
+  overflow: hidden;
+  flex: 1 1 auto;
 }
 
 .commands-preview {
@@ -594,8 +720,89 @@
   justify-content: flex-end;
 }
 
+.webgal-drawer-layer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: flex-end;
+  padding: 88px 20px 94px;
+  background: rgba(6, 10, 15, 0.4);
+}
+
+.webgal-drawer {
+  width: min(460px, 100%);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(86, 106, 130, 0.4);
+  border-radius: 20px;
+  background:
+    linear-gradient(180deg, rgba(30, 41, 53, 0.98), rgba(21, 29, 38, 0.99));
+  box-shadow: 0 24px 60px rgba(4, 8, 14, 0.42);
+}
+
+.webgal-drawer-copy {
+  margin: 0;
+  color: var(--wg-text-dim);
+  font-size: 0.84rem;
+  line-height: 1.6;
+}
+
+.webgal-json-editor-shell {
+  min-height: 0;
+  flex: 1 1 auto;
+  padding: 12px;
+  border: 1px solid rgba(85, 105, 128, 0.28);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(35, 47, 61, 0.92), rgba(26, 35, 45, 0.96));
+}
+
+.webgal-json-editor {
+  width: 100%;
+  height: 100%;
+  min-height: 360px;
+  border: 1px solid rgba(94, 117, 144, 0.34);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(16, 22, 29, 0.96), rgba(19, 26, 34, 0.98));
+  color: var(--wg-text);
+  padding: 14px 16px;
+  resize: none;
+  font: 500 0.87rem/1.7 "Cascadia Code", "Consolas", "Microsoft YaHei UI", monospace;
+}
+
+.webgal-json-editor:focus {
+  outline: none;
+  border-color: rgba(138, 164, 195, 0.64);
+  box-shadow:
+    0 0 0 3px rgba(111, 143, 192, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.02);
+}
+
+.webgal-drawer-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.webgal-drawer-meta {
+  color: var(--wg-text-dim);
+  font-size: 0.8rem;
+}
+
+.webgal-drawer-error {
+  margin: 0;
+  color: #f0c5c5;
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
 .commands-preview,
 .script-input,
+.webgal-json-editor,
 .webgal-mapping-list,
 .webgal-role-list {
   scrollbar-width: thin;
@@ -604,6 +811,7 @@
 
 .commands-preview::-webkit-scrollbar,
 .script-input::-webkit-scrollbar,
+.webgal-json-editor::-webkit-scrollbar,
 .webgal-mapping-list::-webkit-scrollbar,
 .webgal-role-list::-webkit-scrollbar {
   width: 12px;
@@ -612,6 +820,7 @@
 
 .commands-preview::-webkit-scrollbar-track,
 .script-input::-webkit-scrollbar-track,
+.webgal-json-editor::-webkit-scrollbar-track,
 .webgal-mapping-list::-webkit-scrollbar-track,
 .webgal-role-list::-webkit-scrollbar-track {
   background: rgba(16, 22, 30, 0.92);
@@ -620,6 +829,7 @@
 
 .commands-preview::-webkit-scrollbar-thumb,
 .script-input::-webkit-scrollbar-thumb,
+.webgal-json-editor::-webkit-scrollbar-thumb,
 .webgal-mapping-list::-webkit-scrollbar-thumb,
 .webgal-role-list::-webkit-scrollbar-thumb {
   background: linear-gradient(180deg, rgba(79, 101, 129, 0.96), rgba(55, 72, 94, 0.98));
@@ -633,6 +843,7 @@
 
 .commands-preview::-webkit-scrollbar-thumb:hover,
 .script-input::-webkit-scrollbar-thumb:hover,
+.webgal-json-editor::-webkit-scrollbar-thumb:hover,
 .webgal-mapping-list::-webkit-scrollbar-thumb:hover,
 .webgal-role-list::-webkit-scrollbar-thumb:hover {
   background: linear-gradient(180deg, rgba(105, 132, 166, 0.98), rgba(74, 96, 124, 1));
@@ -640,6 +851,7 @@
 
 .commands-preview::-webkit-scrollbar-thumb:active,
 .script-input::-webkit-scrollbar-thumb:active,
+.webgal-json-editor::-webkit-scrollbar-thumb:active,
 .webgal-mapping-list::-webkit-scrollbar-thumb:active,
 .webgal-role-list::-webkit-scrollbar-thumb:active {
   background: linear-gradient(180deg, rgba(205, 132, 72, 0.98), rgba(148, 88, 45, 1));
@@ -686,6 +898,10 @@
 
   .webgal-workbench {
     grid-template-columns: 1fr;
+  }
+
+  .webgal-drawer-layer {
+    padding: 74px 12px 86px;
   }
 
   .webgal-editor-footer,
