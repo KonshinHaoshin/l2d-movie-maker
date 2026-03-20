@@ -374,7 +374,7 @@ export default function ControlPanel(props: Props) {
     if (items.length === 0) {
       return (
         <div className="pane-empty">
-          <strong>{kind === "motion" ? "还没有动作素材" : "还没有表情素材"}</strong>
+          <strong>{kind === "motion" ? "还没有动作" : "还没有表情"}</strong>
           <span>先加载模型，再从这里预览并加入时间线。</span>
         </div>
       );
@@ -387,7 +387,7 @@ export default function ControlPanel(props: Props) {
             <div className="asset-copy">
               <strong>{name}</strong>
               <span>
-                {kind === "motion" && motionLen[name] ? `${motionLen[name].toFixed(2)} 秒` : kind === "motion" ? "动作素材" : ""}
+                {kind === "motion" && motionLen[name] ? `${motionLen[name].toFixed(2)} 秒` : kind === "motion" ? "动作" : ""}
               </span>
             </div>
             <div className="asset-actions">
@@ -434,7 +434,7 @@ export default function ControlPanel(props: Props) {
       <div ref={paneScrollRef} className="workspace-pane-scroll">
         {mode === "resources" ? (
           <>
-            <PanelSection title="动作素材" meta={`${filteredMotions.length} 条`} className="workspace-section--library">
+            <PanelSection title="动作" meta={`${filteredMotions.length} 条`} className="workspace-section--library">
               <div className="toolbar-row">
                 <input
                   className="input input--full"
@@ -473,7 +473,7 @@ export default function ControlPanel(props: Props) {
               {renderResourceList(motionSlice, currentMotion, chooseMotion, addMotionClip, "motion")}
             </PanelSection>
 
-            <PanelSection title="表情素材" meta={`${filteredExpressions.length} 条`} className="workspace-section--library">
+            <PanelSection title="表情" meta={`${filteredExpressions.length} 条`} className="workspace-section--library">
               <div className="toolbar-row">
                 <input
                   className="input input--full"
