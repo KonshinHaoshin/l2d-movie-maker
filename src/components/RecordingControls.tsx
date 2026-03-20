@@ -12,6 +12,9 @@
   onSaveWebM: () => void;
   onConvertToMov: () => void;
   onStartOfflineExport: () => void;
+  onStartSubtitleOnlyExport: () => void;
+  onStartLive2DOnlyExport: () => void;
+  onExportSubtitlesSrt: () => void;
   onTakeScreenshot: () => void;
   onTakePartsScreenshots: () => void;
   isVp9AlphaSupported: () => boolean;
@@ -31,6 +34,9 @@ export default function RecordingControls({
   onSaveWebM,
   onConvertToMov,
   onStartOfflineExport,
+  onStartSubtitleOnlyExport,
+  onStartLive2DOnlyExport,
+  onExportSubtitlesSrt,
   onTakeScreenshot,
   onTakePartsScreenshots,
   isVp9AlphaSupported,
@@ -108,13 +114,36 @@ export default function RecordingControls({
       )}
 
       {!isRecording && (
-        <button
-          onClick={onStartOfflineExport}
-          disabled={isBusy}
-          className="offline-button"
-        >
-          离线导出 WebM
-        </button>
+        <div className="button-grid">
+          <button
+            onClick={onStartOfflineExport}
+            disabled={isBusy}
+            className="offline-button"
+          >
+            离线导出全部
+          </button>
+          <button
+            onClick={onStartSubtitleOnlyExport}
+            disabled={isBusy}
+            className="offline-button"
+          >
+            导出字幕 WebM
+          </button>
+          <button
+            onClick={onStartLive2DOnlyExport}
+            disabled={isBusy}
+            className="offline-button"
+          >
+            导出 Live2D WebM
+          </button>
+          <button
+            onClick={onExportSubtitlesSrt}
+            disabled={isBusy}
+            className="download-button"
+          >
+            导出 SRT
+          </button>
+        </div>
       )}
 
       {(isRecording || isOfflineExporting) && (

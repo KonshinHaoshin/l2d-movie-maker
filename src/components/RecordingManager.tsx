@@ -19,6 +19,7 @@ interface RecordingManagerProps {
   motionClips: Clip[];
   exprClips: Clip[];
   audioClips: Clip[];
+  subtitleClips: Clip[];
   recordingQuality: "low" | "medium" | "high";
   customRecordingBounds?: { x: number; y: number; width: number; height: number };
   useModelFrame?: boolean;
@@ -36,6 +37,7 @@ export default function RecordingManager({
   motionClips,
   exprClips,
   audioClips,
+  subtitleClips,
   recordingQuality,
   customRecordingBounds,
   useModelFrame = false,
@@ -61,6 +63,7 @@ export default function RecordingManager({
       motionClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
       exprClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
       audioClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
+      subtitleClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
       0
     );
 
