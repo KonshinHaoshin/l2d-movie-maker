@@ -49,7 +49,7 @@
 .editor-topbar {
   flex: 0 0 78px;
   display: grid;
-  grid-template-columns: minmax(180px, 260px) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
   align-items: center;
   gap: 18px;
   padding: 14px 20px;
@@ -91,8 +91,7 @@
 }
 
 .topbar-select-group,
-.topbar-button-group,
-.editor-topbar-status {
+.topbar-button-group {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -106,20 +105,6 @@
   font-size: 0.83rem;
   color: var(--text-dim);
   white-space: nowrap;
-}
-
-.editor-topbar-status {
-  color: var(--text-dim);
-  font-size: 0.8rem;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-}
-
-.editor-topbar-status span {
-  padding: 6px 10px;
-  border: 1px solid rgba(74, 92, 115, 0.34);
-  border-radius: 999px;
-  background: rgba(26, 34, 45, 0.9);
 }
 
 .editor-workspace {
@@ -1179,10 +1164,6 @@
     grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
   }
 
-  .editor-topbar-status {
-    grid-column: 1 / -1;
-    justify-content: flex-start;
-  }
 }
 
 @media (max-width: 1366px) {

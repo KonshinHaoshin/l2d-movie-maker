@@ -291,10 +291,7 @@ export default function ControlPanel(props: Props) {
   const selectedModelLabel = selectedModel
     ? selectedModelParts[selectedModelParts.length - 2] ?? selectedModel
     : "未选择模型";
-  const selectedCharacterLabel =
-    characterOptions.find((option) => option.id === selectedCharacterId)?.label ??
-    characterOptions[0]?.label ??
-    "主角色";
+  const hasMultipleCharacters = characterOptions.length > 1;
 
   const formatTransformValue = (value: number, digits: number, fallback: string) =>
     Number.isFinite(value) ? value.toFixed(digits) : fallback;
@@ -517,36 +514,27 @@ export default function ControlPanel(props: Props) {
           <>
             {activeInspectorTab === "character" ? (
               <>
-                <PanelSection title="角色选择" meta={`${characterOptions.length} 个角色`}>
-                  <div className="field-stack">
-                    <label className="field-label" htmlFor="inspector-role-select">
-                      当前角色
-                    </label>
-                    <select
-                      id="inspector-role-select"
-                      className="input input--full"
-                      value={selectedCharacterId}
-                      onChange={(event) => onSelectCharacter(event.target.value)}
-                    >
-                      {characterOptions.length === 0 ? <option value="main">主角色</option> : null}
-                      {characterOptions.map((option) => (
-                        <option key={option.id} value={option.id}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="meta-grid">
-                    <div>
-                      <span>编辑目标</span>
-                      <strong>{selectedCharacterLabel}</strong>
+                {hasMultipleCharacters ? (
+                  <PanelSection title="角色">
+                    <div className="field-stack">
+                      <label className="field-label" htmlFor="inspector-role-select">
+                        当前编辑目标
+                      </label>
+                      <select
+                        id="inspector-role-select"
+                        className="input input--full"
+                        value={selectedCharacterId}
+                        onChange={(event) => onSelectCharacter(event.target.value)}
+                      >
+                        {characterOptions.map((option) => (
+                          <option key={option.id} value={option.id}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
                     </div>
-                    <div>
-                      <span>拖拽状态</span>
-                      <strong>{isDragging ? "拖拽中" : enableDragging ? "已开启" : "已关闭"}</strong>
-                    </div>
-                  </div>
-                </PanelSection>
+                  </PanelSection>
+                ) : null}
 
                 <PanelSection title="变换">
                   <div className="transform-grid">
@@ -582,7 +570,7 @@ export default function ControlPanel(props: Props) {
                       checked={enableDragging}
                       onChange={(event) => setEnableDragging(event.target.checked)}
                     />
-                    <span>允许在预览区直接拖拽角色</span>
+                    <span>{isDragging ? "正在拖拽模型" : "允许在预览区直接拖拽模型"}</span>
                   </label>
                 </PanelSection>
               </>
