@@ -71,6 +71,7 @@ export type WebGALImportPlan = {
   selectedRoleId: string;
   selectedRoleLabel: string;
   selectedFigurePath: string;
+  includeSubtitles: boolean;
   groups: WebGALImportGroup[];
 };
 
@@ -506,6 +507,7 @@ export function createWebGALImportPlan(args: {
   selectedRoleId: string;
   selectedRoleLabel: string;
   selectedFigurePath: string;
+  includeSubtitles: boolean;
   previewGroups: WebGALPreviewGroup[];
 }): WebGALImportPlan {
   return {
@@ -514,6 +516,7 @@ export function createWebGALImportPlan(args: {
     selectedRoleId: args.selectedRoleId,
     selectedRoleLabel: args.selectedRoleLabel,
     selectedFigurePath: args.selectedFigurePath,
+    includeSubtitles: args.includeSubtitles,
     groups: args.previewGroups
       .filter((group) => !group.skipReason)
       .map((group) => ({

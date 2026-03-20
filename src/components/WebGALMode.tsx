@@ -97,6 +97,7 @@ export default function WebGALMode({
   const [showRoleMappings, setShowRoleMappings] = useState(false);
   const [roleMappingEditorText, setRoleMappingEditorText] = useState("{}");
   const [roleMappingEditorError, setRoleMappingEditorError] = useState("");
+  const [includeSubtitles, setIncludeSubtitles] = useState(true);
 
   const parserStateLabel = error
     ? "解析异常"
@@ -472,6 +473,7 @@ export default function WebGALMode({
       selectedRoleId,
       selectedRoleLabel: selectedRoleSummary.label,
       selectedFigurePath,
+      includeSubtitles,
       previewGroups,
     });
 
@@ -681,6 +683,18 @@ export default function WebGALMode({
                         )}
                       </label>
                     </div>
+
+                    <label className="webgal-toggle-row">
+                      <input
+                        type="checkbox"
+                        checked={includeSubtitles}
+                        onChange={(event) => setIncludeSubtitles(event.target.checked)}
+                      />
+                      <span>
+                        导入对白字幕
+                        <small>对白文本会生成字幕轨，并与动作、表情、语音保持同起止时长。</small>
+                      </span>
+                    </label>
                   </>
                 ) : (
                   <div className="webgal-empty">
@@ -697,7 +711,7 @@ export default function WebGALMode({
         <div className="webgal-actions">
           <div className="webgal-actions-copy">
             <strong>导入单角色时间线</strong>
-            <span>当前会替换现有三轨内容，并把选定立绘加载到预览区。语音优先决定组时长，没有语音时按动作时长回退。</span>
+            <span>当前会替换现有时间线内容，并把选定立绘加载到预览区。语音优先决定组时长，没有语音时按动作时长回退。</span>
           </div>
           <div className="webgal-actions-buttons">
             <button

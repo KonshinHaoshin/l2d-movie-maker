@@ -39,6 +39,7 @@ pub fn run() {
             crate::commands::webgal::webgal_path_exists,
             crate::commands::webgal::webgal_read_text_file,
             crate::commands::webgal::validate_webgal_project_dir,
+            crate::commands::webgal::list_system_font_families,
         ]);
 
     // 打出真实错误
