@@ -33,6 +33,7 @@ pub fn run() {
             crate::commands::media::encode_png_sequence_to_webm_alpha,
             crate::commands::models::find_live2d_models,
             crate::commands::server::get_model_server_info,
+            crate::commands::server::register_external_asset_root,
             crate::commands::server::refresh_model_index,
             crate::commands::media::set_fs_scope,
             crate::commands::webgal::webgal_path_exists,

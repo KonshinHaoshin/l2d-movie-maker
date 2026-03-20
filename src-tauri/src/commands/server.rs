@@ -1,8 +1,16 @@
 // src-tauri/src/commands/server.rs
-use std::{path::{Path, PathBuf}, thread, sync::OnceLock, fs};
+use std::{
+    collections::{hash_map::DefaultHasher, HashMap},
+    fs,
+    hash::{Hash, Hasher},
+    io::Read,
+    path::{Path, PathBuf},
+    sync::{Mutex, OnceLock},
+    thread,
+};
 use serde::Serialize;
 use serde_json::Value;
-use tiny_http::{Server, Response, Request};
+use tiny_http::{Header, Method, Request, Response, Server};
 use mime_guess;
 use urlencoding;
 
@@ -17,6 +25,13 @@ pub struct ModelServerInfo {
 pub struct ModelEntry {
     pub label: String,
     pub path: String,
+}
+
+#[derive(Serialize)]
+pub struct ExternalAssetRootInfo {
+    pub root_key: String,
+    pub root_path: String,
+    pub base_url: String,
 }
 
 /// 获取可执行文件所在目录
@@ -57,8 +72,48 @@ fn start_static_server(model_root: PathBuf) -> u16 {
     panic!("无法绑定任何可用端口，请检查网络配置");
 }
 
+fn external_roots() -> &'static Mutex<HashMap<String, PathBuf>> {
+    static EXTERNAL_ROOTS: OnceLock<Mutex<HashMap<String, PathBuf>>> = OnceLock::new();
+    EXTERNAL_ROOTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn hash_root_key(path: &Path) -> String {
+    let normalized = path.to_string_lossy().to_lowercase();
+    let mut hasher = DefaultHasher::new();
+    normalized.hash(&mut hasher);
+    format!("{:x}", hasher.finish())
+}
+
+fn ensure_model_server_started() -> Result<u16, String> {
+    let base_dir = exe_dir();
+    let model_dir = base_dir.join("model");
+
+    if !model_dir.exists() {
+        std::fs::create_dir_all(&model_dir)
+            .map_err(|e| format!("创建 model 目录失败: {}", e))?;
+    }
+
+    static PORT: OnceLock<u16> = OnceLock::new();
+    let port = *PORT.get_or_init(|| start_static_server(model_dir));
+    std::env::set_var("VITE_TAURI_SERVER_PORT", port.to_string());
+    Ok(port)
+}
+
+fn add_cors_headers<T: Read>(response: &mut Response<T>) {
+    response.add_header(Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap());
+    response.add_header(Header::from_bytes(&b"Access-Control-Allow-Methods"[..], &b"GET, OPTIONS"[..]).unwrap());
+    response.add_header(Header::from_bytes(&b"Access-Control-Allow-Headers"[..], &b"*"[..]).unwrap());
+}
+
 /// 处理 HTTP 请求
 fn handle_req(req: Request, model_root: &PathBuf) {
+    if req.method() == &Method::Options {
+        let mut resp = Response::empty(204);
+        add_cors_headers(&mut resp);
+        let _ = req.respond(resp);
+        return;
+    }
+
     let url = req.url().to_string();
     
     // 支持 /model/... 和 /figure/... 路由
@@ -67,15 +122,19 @@ fn handle_req(req: Request, model_root: &PathBuf) {
     } else if url.starts_with("/figure/") {
         ("/figure/", url.strip_prefix("/figure/").unwrap_or(""))
     } else {
-        let _ = req.respond(Response::from_string("Not Found").with_status_code(404));
+        let mut resp = Response::from_string("Not Found").with_status_code(404);
+        add_cors_headers(&mut resp);
+        let _ = req.respond(resp);
         return;
     };
     
     // 对相对路径进行URL解码，处理中文字符等非ASCII字符
-    let decoded_rel = match urlencoding::decode(rel) {
+    let decoded_rel = match urlencoding::decode(&rel) {
         Ok(decoded) => decoded,
         Err(_) => {
-            let _ = req.respond(Response::from_string("Invalid URL encoding").with_status_code(400));
+            let mut resp = Response::from_string("Invalid URL encoding").with_status_code(400);
+            add_cors_headers(&mut resp);
+            let _ = req.respond(resp);
             return;
         }
     };
@@ -85,7 +144,9 @@ fn handle_req(req: Request, model_root: &PathBuf) {
     // 禁止目录遍历
     if let Ok(canon) = path.canonicalize() {
         if !canon.starts_with(model_root.canonicalize().unwrap()) {
-            let _ = req.respond(Response::from_string("Forbidden").with_status_code(403));
+            let mut resp = Response::from_string("Forbidden").with_status_code(403);
+            add_cors_headers(&mut resp);
+            let _ = req.respond(resp);
             return;
         }
     }
@@ -101,35 +162,73 @@ fn handle_req(req: Request, model_root: &PathBuf) {
                 let mime = mime_guess::from_path(&path).first_or_octet_stream();
                 resp.add_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], mime.as_ref().as_bytes()).unwrap());
             }
-            // 允许跨源（前端是 http://localhost）
-            resp.add_header(tiny_http::Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap());
+            add_cors_headers(&mut resp);
             let _ = req.respond(resp);
         }
         Err(_) => {
-            let _ = req.respond(Response::from_string("Not Found").with_status_code(404));
+            let mut resp = Response::from_string("Not Found").with_status_code(404);
+            add_cors_headers(&mut resp);
+            let _ = req.respond(resp);
         }
     }
 }
 
 /// 处理 HTTP 请求（支持多个根目录）
 fn handle_req_with_roots(req: Request, model_root: &PathBuf, figure_root: &PathBuf) {
+    if req.method() == &Method::Options {
+        let mut resp = Response::empty(204);
+        add_cors_headers(&mut resp);
+        let _ = req.respond(resp);
+        return;
+    }
+
     let url = req.url().to_string();
     
-    // 支持 /model/... 和 /figure/... 路由
+    // 支持 /model/... /figure/... /external/<key>/... 路由
     let (root_dir, rel) = if url.starts_with("/model/") {
-        (model_root, url.strip_prefix("/model/").unwrap_or(""))
+        (model_root.clone(), url.strip_prefix("/model/").unwrap_or("").to_string())
     } else if url.starts_with("/figure/") {
-        (figure_root, url.strip_prefix("/figure/").unwrap_or(""))
+        (figure_root.clone(), url.strip_prefix("/figure/").unwrap_or("").to_string())
+    } else if url.starts_with("/external/") {
+        let external_rel = url.strip_prefix("/external/").unwrap_or("");
+        let mut segments = external_rel.splitn(2, '/');
+        let root_key = segments.next().unwrap_or("");
+        let rel = segments.next().unwrap_or("");
+
+        if root_key.is_empty() || rel.is_empty() {
+            let mut resp = Response::from_string("Not Found").with_status_code(404);
+            add_cors_headers(&mut resp);
+            let _ = req.respond(resp);
+            return;
+        }
+
+        let root_dir = {
+            let registry = external_roots().lock().unwrap();
+            registry.get(root_key).cloned()
+        };
+
+        let Some(root_dir) = root_dir else {
+            let mut resp = Response::from_string("Not Found").with_status_code(404);
+            add_cors_headers(&mut resp);
+            let _ = req.respond(resp);
+            return;
+        };
+
+        (root_dir, rel.to_string())
     } else {
-        let _ = req.respond(Response::from_string("Not Found").with_status_code(404));
+        let mut resp = Response::from_string("Not Found").with_status_code(404);
+        add_cors_headers(&mut resp);
+        let _ = req.respond(resp);
         return;
     };
     
     // 对相对路径进行URL解码，处理中文字符等非ASCII字符
-    let decoded_rel = match urlencoding::decode(rel) {
+    let decoded_rel = match urlencoding::decode(&rel) {
         Ok(decoded) => decoded,
         Err(_) => {
-            let _ = req.respond(Response::from_string("Invalid URL encoding").with_status_code(400));
+            let mut resp = Response::from_string("Invalid URL encoding").with_status_code(400);
+            add_cors_headers(&mut resp);
+            let _ = req.respond(resp);
             return;
         }
     };
@@ -139,7 +238,9 @@ fn handle_req_with_roots(req: Request, model_root: &PathBuf, figure_root: &PathB
     // 禁止目录遍历
     if let Ok(canon) = path.canonicalize() {
         if !canon.starts_with(root_dir.canonicalize().unwrap()) {
-            let _ = req.respond(Response::from_string("Forbidden").with_status_code(403));
+            let mut resp = Response::from_string("Forbidden").with_status_code(403);
+            add_cors_headers(&mut resp);
+            let _ = req.respond(resp);
             return;
         }
     }
@@ -155,12 +256,13 @@ fn handle_req_with_roots(req: Request, model_root: &PathBuf, figure_root: &PathB
                 let mime = mime_guess::from_path(&path).first_or_octet_stream();
                 resp.add_header(tiny_http::Header::from_bytes(&b"Content-Type"[..], mime.as_ref().as_bytes()).unwrap());
             }
-            // 允许跨源（前端是 http://localhost）
-            resp.add_header(tiny_http::Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]).unwrap());
+            add_cors_headers(&mut resp);
             let _ = req.respond(resp);
         }
         Err(_) => {
-            let _ = req.respond(Response::from_string("Not Found").with_status_code(404));
+            let mut resp = Response::from_string("Not Found").with_status_code(404);
+            add_cors_headers(&mut resp);
+            let _ = req.respond(resp);
         }
     }
 }
@@ -352,25 +454,58 @@ fn generate_models_json(models_dir: &PathBuf) -> Result<(), String> {
 /// 获取模型服务器信息
 #[tauri::command]
 pub fn get_model_server_info() -> Result<ModelServerInfo, String> {
-    let base_dir = exe_dir();
-    let model_dir = base_dir.join("model");
-    
-    // 确保 model 目录存在
-    if !model_dir.exists() {
-        std::fs::create_dir_all(&model_dir)
-            .map_err(|e| format!("创建 model 目录失败: {}", e))?;
-    }
-    
-    // 使用静态变量缓存端口号
-    static PORT: OnceLock<u16> = OnceLock::new();
-    let port = *PORT.get_or_init(|| start_static_server(model_dir.clone()));
-    
-    // 设置环境变量，让前端知道实际端口
-    std::env::set_var("VITE_TAURI_SERVER_PORT", port.to_string());
-    
+    let model_dir = exe_dir().join("model");
+    let port = ensure_model_server_started()?;
+
     Ok(ModelServerInfo {
         base_url: format!("http://127.0.0.1:{}/model", port),
         models_dir: model_dir.to_string_lossy().into(),
+    })
+}
+
+#[tauri::command]
+pub fn register_external_asset_root(path: String) -> Result<ExternalAssetRootInfo, String> {
+    let root = PathBuf::from(&path);
+    if !root.exists() {
+        return Err(format!("外部资源目录不存在: {}", path));
+    }
+    if !root.is_dir() {
+        return Err(format!("外部资源路径不是目录: {}", path));
+    }
+
+    let canonical_root = root
+        .canonicalize()
+        .map_err(|error| format!("无法解析外部资源目录 '{}': {}", path, error))?;
+
+    let base_key = hash_root_key(&canonical_root);
+    let root_key = {
+        let mut registry = external_roots()
+            .lock()
+            .map_err(|_| "外部资源注册表已损坏".to_string())?;
+
+        let mut candidate = base_key.clone();
+        let mut index = 1usize;
+
+        loop {
+            match registry.get(&candidate) {
+                Some(existing) if existing != &canonical_root => {
+                    candidate = format!("{}-{}", base_key, index);
+                    index += 1;
+                }
+                _ => {
+                    registry.insert(candidate.clone(), canonical_root.clone());
+                    break candidate;
+                }
+            }
+        }
+    };
+
+    let port = ensure_model_server_started()?;
+
+    Ok(ExternalAssetRootInfo {
+        root_key: root_key.clone(),
+        root_path: canonical_root.to_string_lossy().into_owned(),
+        base_url: format!("http://127.0.0.1:{}/external/{}", port, root_key),
     })
 }
 

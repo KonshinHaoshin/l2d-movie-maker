@@ -348,6 +348,7 @@ export default function WebGALMode({
       }
 
       const groups = await buildWebGALPreviewGroups({
+        projectRoot,
         commands: parsedCommands,
         selectedRoleId,
         selectedFigurePath,

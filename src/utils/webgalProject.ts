@@ -1,4 +1,4 @@
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import { appLocalDataDir, dirname, join } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
 import { exists, mkdir, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
@@ -80,12 +80,72 @@ type WebGALProjectValidation = {
   adjusted_from_game_dir: boolean;
 };
 
+type ExternalAssetRootInfo = {
+  root_key: string;
+  root_path: string;
+  base_url: string;
+};
+
+const externalAssetBaseUrlCache = new Map<string, string>();
+
 async function externalPathExists(path: string): Promise<boolean> {
   return invoke<boolean>("webgal_path_exists", { path });
 }
 
 async function externalReadTextFile(path: string): Promise<string> {
   return invoke<string>("webgal_read_text_file", { path });
+}
+
+function encodeUrlPathSegments(path: string): string {
+  return normalizePath(path)
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
+function toProjectRelativePath(projectRoot: string, targetPath: string): string {
+  const normalizedRoot = normalizePath(projectRoot).replace(/[\\/]+$/g, "");
+  const normalizedTarget = normalizePath(targetPath)
+    .replace(/^\.\/+/g, "")
+    .replace(/^[\\/]+/g, "");
+
+  if (!isAbsolutePath(normalizedTarget)) {
+    return normalizedTarget;
+  }
+
+  const rootLower = normalizedRoot.toLowerCase();
+  const targetLower = normalizedTarget.toLowerCase();
+
+  if (targetLower === rootLower) {
+    return "";
+  }
+
+  if (targetLower.startsWith(`${rootLower}/`) || targetLower.startsWith(`${rootLower}\\`)) {
+    return normalizedTarget.slice(normalizedRoot.length).replace(/^[\\/]+/g, "");
+  }
+
+  throw new Error(`路径不在当前 WebGAL 项目内: ${targetPath}`);
+}
+
+async function getExternalAssetBaseUrl(projectRoot: string): Promise<string> {
+  const normalizedRoot = normalizePath(projectRoot);
+  const cached = externalAssetBaseUrlCache.get(normalizedRoot);
+  if (cached) return cached;
+
+  const result = await invoke<ExternalAssetRootInfo>("register_external_asset_root", {
+    path: normalizedRoot,
+  });
+  const normalizedBaseUrl = result.base_url.replace(/\/+$/g, "");
+  externalAssetBaseUrlCache.set(normalizedRoot, normalizedBaseUrl);
+  return normalizedBaseUrl;
+}
+
+export async function buildWebGALExternalAssetUrl(projectRoot: string, targetPath: string): Promise<string> {
+  const baseUrl = await getExternalAssetBaseUrl(projectRoot);
+  const relativePath = toProjectRelativePath(projectRoot, targetPath);
+  if (!relativePath) return baseUrl;
+  return `${baseUrl}/${encodeUrlPathSegments(relativePath)}`;
 }
 
 function createEmptyStore(): WebGALStore {
@@ -326,14 +386,20 @@ export async function detectWebGALAudioRoot(
   return undefined;
 }
 
-export async function probeAudioDuration(audioAbsolutePath: string): Promise<number | undefined> {
+export async function probeAudioDuration(projectRoot: string, audioAbsolutePath: string): Promise<number | undefined> {
   if (!AUDIO_EXT_RE.test(audioAbsolutePath)) return undefined;
   if (!(await externalPathExists(audioAbsolutePath))) return undefined;
 
-  const audioUrl = convertFileSrc(audioAbsolutePath);
+  let audioUrl: string;
+  try {
+    audioUrl = await buildWebGALExternalAssetUrl(projectRoot, audioAbsolutePath);
+  } catch {
+    return undefined;
+  }
 
   return new Promise((resolve) => {
     const audio = new Audio(audioUrl);
+    audio.crossOrigin = "anonymous";
     const cleanup = () => {
       audio.onloadedmetadata = null;
       audio.onerror = null;
@@ -352,6 +418,7 @@ export async function probeAudioDuration(audioAbsolutePath: string): Promise<num
 }
 
 type BuildPreviewArgs = {
+  projectRoot: string;
   commands: WebGALCommand[];
   selectedRoleId: string;
   selectedFigurePath?: string;
@@ -362,6 +429,7 @@ type BuildPreviewArgs = {
 };
 
 export async function buildWebGALPreviewGroups({
+  projectRoot,
   commands,
   selectedRoleId,
   selectedFigurePath,
@@ -391,7 +459,10 @@ export async function buildWebGALPreviewGroups({
     }
 
     const audioAbsolutePath = await resolveAudioAbsolutePath(audioRoot, command.data.audioPath);
-    const audioDurationSec = audioAbsolutePath ? await probeAudioDuration(audioAbsolutePath) : undefined;
+    const audioDurationSec =
+      audioAbsolutePath && projectRoot
+        ? await probeAudioDuration(projectRoot, audioAbsolutePath)
+        : undefined;
     const fallbackDuration =
       (currentMotion ? motionDurationMap[currentMotion] : undefined) ??
       defaultMotionDuration ??
