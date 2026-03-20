@@ -105,14 +105,18 @@ function encodeUrlPathSegments(path: string): string {
     .join("/");
 }
 
-function toProjectRelativePath(projectRoot: string, targetPath: string): string {
-  const normalizedRoot = normalizePath(projectRoot).replace(/[\\/]+$/g, "");
-  const normalizedTarget = normalizePath(targetPath)
+function trimRelativeAssetPath(path: string): string {
+  return normalizePath(path)
     .replace(/^\.\/+/g, "")
     .replace(/^[\\/]+/g, "");
+}
+
+function toProjectRelativePath(projectRoot: string, targetPath: string): string | null {
+  const normalizedRoot = normalizePath(projectRoot).replace(/[\\/]+$/g, "");
+  const normalizedTarget = normalizePath(targetPath).replace(/^\.\/+/g, "");
 
   if (!isAbsolutePath(normalizedTarget)) {
-    return normalizedTarget;
+    return trimRelativeAssetPath(normalizedTarget);
   }
 
   const rootLower = normalizedRoot.toLowerCase();
@@ -126,7 +130,13 @@ function toProjectRelativePath(projectRoot: string, targetPath: string): string 
     return normalizedTarget.slice(normalizedRoot.length).replace(/^[\\/]+/g, "");
   }
 
-  throw new Error(`路径不在当前 WebGAL 项目内: ${targetPath}`);
+  return null;
+}
+
+function getPathLeaf(path: string): string {
+  const normalized = normalizePath(path).replace(/[\\/]+$/g, "");
+  const parts = normalized.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? normalized;
 }
 
 async function getExternalAssetBaseUrl(projectRoot: string): Promise<string> {
@@ -143,8 +153,23 @@ async function getExternalAssetBaseUrl(projectRoot: string): Promise<string> {
 }
 
 export async function buildWebGALExternalAssetUrl(projectRoot: string, targetPath: string): Promise<string> {
-  const baseUrl = await getExternalAssetBaseUrl(projectRoot);
-  const relativePath = toProjectRelativePath(projectRoot, targetPath);
+  const normalizedTarget = normalizePath(targetPath).replace(/^\.\/+/g, "");
+  const projectRelativePath = toProjectRelativePath(projectRoot, normalizedTarget);
+
+  if (projectRelativePath !== null) {
+    const baseUrl = await getExternalAssetBaseUrl(projectRoot);
+    if (!projectRelativePath) return baseUrl;
+    return `${baseUrl}/${encodeUrlPathSegments(projectRelativePath)}`;
+  }
+
+  if (!isAbsolutePath(normalizedTarget)) {
+    throw new Error(`无法解析外部资源路径: ${targetPath}`);
+  }
+
+  // 项目外资源当前只用于独立音频文件，直接以文件所在目录作为静态根即可。
+  const assetRoot = normalizePath(await dirname(normalizedTarget));
+  const baseUrl = await getExternalAssetBaseUrl(assetRoot);
+  const relativePath = getPathLeaf(normalizedTarget);
   if (!relativePath) return baseUrl;
   return `${baseUrl}/${encodeUrlPathSegments(relativePath)}`;
 }
