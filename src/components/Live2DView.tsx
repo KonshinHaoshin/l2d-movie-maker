@@ -136,6 +136,7 @@ export default function Live2DView() {
   const useModelFrame = false;
   const [characterOptions, setCharacterOptions] = useState<CharacterOption[]>([]);
   const [selectedCharacterId, setSelectedCharacterId] = useState<string>("main");
+  const [isCharacterVisible, setIsCharacterVisible] = useState(true);
   const [characterTransform, setCharacterTransform] = useState<CharacterTransform>({ x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0 });
   const characterTransformRef = useRef<CharacterTransform>({ x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0 });
   const isDraggingRef = useRef(false);
@@ -190,6 +191,39 @@ export default function Live2DView() {
     return cur;
   };
 
+  const getSelectedCharacterDisplayObjects = (): PIXI.DisplayObject[] => {
+    const currentModel = modelRef.current;
+    if (!currentModel) return [];
+
+    if (Array.isArray(currentModel)) {
+      const matchingModels = currentModel.filter((model) => {
+        const taggedModel = model as JsonlLive2DModel;
+        return (taggedModel.__characterId ?? "") === selectedCharacterId;
+      });
+
+      if (matchingModels.length > 0) {
+        return matchingModels as unknown as PIXI.DisplayObject[];
+      }
+
+      return groupContainerRef.current ? [groupContainerRef.current] : [];
+    }
+
+    return [currentModel as unknown as PIXI.DisplayObject];
+  };
+
+  const syncSelectedCharacterVisibilityState = () => {
+    const targets = getSelectedCharacterDisplayObjects();
+    setIsCharacterVisible(targets.length === 0 ? true : targets.every((target) => target.visible));
+  };
+
+  const setSelectedCharacterVisibility = (visible: boolean) => {
+    const targets = getSelectedCharacterDisplayObjects();
+    targets.forEach((target) => {
+      target.visible = visible;
+    });
+    setIsCharacterVisible(visible);
+  };
+
   const syncRecordingBoundsFromCurrentModel = () => {
     if (Array.isArray(modelRef.current)) {
       if (groupContainerRef.current) {
@@ -211,6 +245,7 @@ export default function Live2DView() {
     if (!cur) {
       setCharacterOptions([]);
       setSelectedCharacterId("main");
+      setIsCharacterVisible(true);
       setCharacterTransform({ x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0 });
       return;
     }
@@ -234,12 +269,14 @@ export default function Live2DView() {
       const target = groupContainerRef.current;
       if (!target) return;
       setCharacterTransform(readTransformFromTarget(target));
+      syncSelectedCharacterVisibilityState();
       return;
     }
 
     setCharacterOptions([{ id: "main", label: "主角色" }]);
     if (selectedCharacterId !== "main") setSelectedCharacterId("main");
     setCharacterTransform(readTransformFromTarget(cur));
+    syncSelectedCharacterVisibilityState();
   };
 
   const updateSelectedCharacterTransform = (patch: Partial<CharacterTransform>) => {
@@ -931,6 +968,7 @@ export default function Live2DView() {
       if (wasTickerStarted) app.ticker.start();
     }
   };
+  void startOfflineExport;
 
   const recordingManager = RecordingManager({
     canvasRef,
@@ -1387,6 +1425,7 @@ export default function Live2DView() {
       if (!modelUrl) {
         setCharacterOptions([]);
         setSelectedCharacterId("main");
+        setIsCharacterVisible(true);
         setCharacterTransform({ x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0 });
         return;
       }
@@ -1484,6 +1523,8 @@ export default function Live2DView() {
     characterOptions,
     selectedCharacterId,
     onSelectCharacter: setSelectedCharacterId,
+    isCharacterVisible,
+    onToggleCharacterVisibility: setSelectedCharacterVisibility,
     characterTransform,
     onUpdateCharacterTransform: updateSelectedCharacterTransform,
     enableDragging,
@@ -1509,9 +1550,6 @@ export default function Live2DView() {
     onStopRecording: stopRecording,
     onSaveWebM: saveWebM,
     onConvertToMov: toMov,
-    onStartOfflineExport: () => void startOfflineExport("all"),
-    onStartSubtitleOnlyExport: () => void startOfflineExport("subtitle-only"),
-    onStartLive2DOnlyExport: () => void startOfflineExport("live2d-only"),
     onExportSubtitlesSrt: exportSubtitlesSrt,
     onTakeScreenshot: () => recordingManager.takeScreenshot(),
     onTakePartsScreenshots: () => recordingManager.takePartsScreenshots(),

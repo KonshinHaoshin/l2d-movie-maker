@@ -11,9 +11,6 @@
   onStopRecording: () => void;
   onSaveWebM: () => void;
   onConvertToMov: () => void;
-  onStartOfflineExport: () => void;
-  onStartSubtitleOnlyExport: () => void;
-  onStartLive2DOnlyExport: () => void;
   onExportSubtitlesSrt: () => void;
   onTakeScreenshot: () => void;
   onTakePartsScreenshots: () => void;
@@ -33,9 +30,6 @@ export default function RecordingControls({
   onStopRecording,
   onSaveWebM,
   onConvertToMov,
-  onStartOfflineExport,
-  onStartSubtitleOnlyExport,
-  onStartLive2DOnlyExport,
   onExportSubtitlesSrt,
   onTakeScreenshot,
   onTakePartsScreenshots,
@@ -115,27 +109,6 @@ export default function RecordingControls({
 
       {!isRecording && (
         <div className="button-grid">
-          <button
-            onClick={onStartOfflineExport}
-            disabled={isBusy}
-            className="offline-button"
-          >
-            离线导出全部
-          </button>
-          <button
-            onClick={onStartSubtitleOnlyExport}
-            disabled={isBusy}
-            className="offline-button"
-          >
-            导出字幕 WebM
-          </button>
-          <button
-            onClick={onStartLive2DOnlyExport}
-            disabled={isBusy}
-            className="offline-button"
-          >
-            导出 Live2D WebM
-          </button>
           <button
             onClick={onExportSubtitlesSrt}
             disabled={isBusy}

@@ -1,4 +1,10 @@
 import * as PIXI from "pixi.js";
+import {
+  loadPixiCompositeModel,
+  resolveCompositePath,
+  type CompositePart,
+  type ExtractCompositeSelectorsResult,
+} from "composite-model";
 import { Live2DModel } from "pixi-live2d-display";
 
 interface Motion { name: string; file: string; }
@@ -38,6 +44,9 @@ type InternalModelLike = {
   angleYParamIndex?: number;
   angleZParamIndex?: number;
   eyeBlink?: InternalEyeBlinkLike;
+  coreModel?: {
+    setParamFloat?: (id: string, value: number) => void;
+  };
 };
 type DraggableDisplayObject = PIXI.Container & DraggableState & {
   autoInteract?: boolean;
@@ -57,6 +66,12 @@ export type JsonlLive2DModel = Live2DModel & {
   __characterId?: string;
   __characterLabel?: string;
   __jsonlRoleMeta?: JsonlRoleMeta;
+  __compositeResolvedUrl?: string;
+};
+
+type ModelJsonLike = {
+  motions?: Record<string, Array<{ name?: string; file?: string }>>;
+  expressions?: Array<{ name?: string; file?: string }>;
 };
 
 interface ModelManagerProps {
@@ -152,6 +167,53 @@ export default function ModelManager({
       width: Math.max(100, Math.min(bounds.width, appRef.current!.screen.width)),
       height: Math.max(100, Math.min(bounds.height, appRef.current!.screen.height)),
     });
+  };
+
+  const disableModelAutoBehaviors = (model: JsonlLive2DModel) => {
+    model.autoInteract = false;
+    const im = model.internalModel as unknown as InternalModelLike | undefined;
+    if (!im) return;
+
+    (["angleXParamIndex", "angleYParamIndex", "angleZParamIndex"] as const).forEach((k) => {
+      if (typeof im[k] === "number") im[k] = -1;
+    });
+
+    if (im.eyeBlink) {
+      im.eyeBlink.blinkInterval = 1000 * 60 * 60 * 24;
+      im.eyeBlink.nextBlinkTimeLeft = 1000 * 60 * 60 * 24;
+    }
+  };
+
+  const getCharacterIdFromPart = (part: CompositePart, fallbackIndex: number) => {
+    const rawRoleId = (part.id && String(part.id).trim()) || (part.folder && String(part.folder).trim()) || `part${part.index ?? fallbackIndex}`;
+    const mergedRoleId = rawRoleId.replace(/\d+$/, "") || rawRoleId;
+    return { rawRoleId, mergedRoleId };
+  };
+
+  const synthesizeCompositeModelData = async (
+    selectors: ExtractCompositeSelectorsResult,
+    firstModelUrl: string,
+  ): Promise<ModelData> => {
+    const firstModelJson = await (await fetch(firstModelUrl, { cache: "no-cache" })).json() as ModelJsonLike;
+    const fullMotions = firstModelJson.motions ?? {};
+    const motionsFiltered: Record<string, Motion[]> = {};
+
+    for (const group of selectors.motions) {
+      const entries = fullMotions[group] ?? [];
+      motionsFiltered[group] = entries.map((item, index) => ({
+        name: item?.name ?? `${group}-${index}`,
+        file: item?.file ?? "",
+      }));
+    }
+
+    const fullExpressions = firstModelJson.expressions ?? [];
+    const expressions = selectors.expressions.length > 0
+      ? fullExpressions
+        .filter((expression) => expression?.name && selectors.expressions.includes(expression.name))
+        .map((expression) => ({ name: expression.name ?? "", file: expression.file ?? "" }))
+      : fullExpressions.map((expression) => ({ name: expression?.name ?? "", file: expression?.file ?? "" }));
+
+    return { motions: motionsFiltered, expressions };
   };
 
   // 使模�?容器可拖�?
@@ -315,18 +377,7 @@ export default function ModelManager({
       model.scale.set(0.3);
       model.position.set(app.screen.width / 2, app.screen.height / 2);
 
-      model.autoInteract = false;
-      const im = model.internalModel as unknown as InternalModelLike | undefined;
-      if (im) {
-        (["angleXParamIndex", "angleYParamIndex", "angleZParamIndex"] as const).forEach((k) => {
-          if (typeof im[k] === "number") im[k] = -1;
-        });
-        // 关闭眨眼
-        if (im?.eyeBlink) {
-          im.eyeBlink.blinkInterval = 1000 * 60 * 60 * 24;
-          im.eyeBlink.nextBlinkTimeLeft = 1000 * 60 * 60 * 24;
-        }
-      }
+      disableModelAutoBehaviors(model);
 
       app.stage.addChild(model);
       if (enableDragging) makeDraggableModel(model);
@@ -351,18 +402,6 @@ export default function ModelManager({
     }
   };
 
-  // 复合�?jsonl）模型加�?
-  type JsonlPart = {
-    path: string;
-    id?: string;
-    folder?: string;
-    index: number;
-    x?: number;
-    y?: number;
-    xscale?: number;
-    yscale?: number;
-  };
-
   const loadJsonlComposite = async (app: PIXI.Application, jsonlUrl: string) => {
     try {
       const response = await fetch(jsonlUrl, { cache: "no-cache" });
@@ -379,153 +418,72 @@ export default function ModelManager({
         throw new Error(`文件不存在或路径错误: ${jsonlUrl} (返回HTML页面)`);
       }
       
-      const lines = text.split("\n").filter(Boolean);
-
-      const parts: JsonlPart[] = [];
-      let summary: { motions?: string[]; expressions?: string[]; import?: number } = {};
-
-      for (const line of lines) {
-        try {
-          const obj = JSON.parse(line);
-          // 汇总行（最后一行）：含 motions �?expressions
-          if (obj?.motions || obj?.expressions) {
-            if (Array.isArray(obj.motions)) summary.motions = obj.motions;
-            if (Array.isArray(obj.expressions)) summary.expressions = obj.expressions;
-            if (obj.import !== undefined) summary.import = Number(obj.import);
-            continue;
-          }
-          if (obj?.path) {
-            const fullPath = obj.path.startsWith("game/")
-              ? obj.path
-              : resolveRelativeFrom(jsonlUrl, obj.path.replace(/^\.\//, ""));
-            parts.push({
-              path: fullPath,
-              id: obj.id,
-              folder: obj.folder,
-              index: typeof obj.index === "number" ? obj.index : parts.length,
-              x: obj.x,
-              y: obj.y,
-              xscale: obj.xscale,
-              yscale: obj.yscale,
-            });
-          }
-        } catch {
-          console.warn("JSONL parse error in line:", line);
-        }
-      }
-
-      if (!parts.length) {
-        console.warn("No valid parts in jsonl:", jsonlUrl);
-        setModelData(null);
-        return;
-      }
-
-      // 用第一只子模型的目录作�?MTN/表达文件的相对解析基�?
-      motionBaseRef.current = parts[0].path.slice(0, parts[0].path.lastIndexOf("/") + 1);
-
-      // 创建容器
-      const group = new PIXI.Container();
-      group.sortableChildren = true;
-      group.position.set(app.screen.width / 2, app.screen.height / 2);
-      groupContainerRef.current = group;
-      app.stage.addChild(group);
-
-      // 加载子模�?
-      const children: Live2DModel[] = [];
-      for (const p of parts) {
-        try {
-          const m = await Live2DModel.from(p.path, { autoInteract: false }) as JsonlLive2DModel;
-          const rawRoleId = (p.id && String(p.id).trim()) || (p.folder && String(p.folder).trim()) || `part${p.index}`;
-          const mergedRoleId = rawRoleId.replace(/\d+$/, "") || rawRoleId;
-          m.__characterId = mergedRoleId;
-          m.__characterLabel = mergedRoleId;
-          m.__jsonlRoleMeta = {
+      const loaded = await loadPixiCompositeModel({
+        jsonlText: text,
+        jsonlUrl,
+        source: jsonlUrl,
+        createContainer: () => {
+          const container = new PIXI.Container();
+          container.sortableChildren = true;
+          container.position.set(app.screen.width / 2, app.screen.height / 2);
+          return container;
+        },
+        resolveAssetUrl: async (part, manifest) => resolveCompositePath(part.path, manifest.source),
+        configureModel: async ({ model, part, resolvedUrl, modelIndex }) => {
+          const taggedModel = model as unknown as JsonlLive2DModel;
+          const { rawRoleId, mergedRoleId } = getCharacterIdFromPart(part, modelIndex);
+          taggedModel.__characterId = mergedRoleId;
+          taggedModel.__characterLabel = mergedRoleId;
+          taggedModel.__compositeResolvedUrl = resolvedUrl;
+          taggedModel.__jsonlRoleMeta = {
             id: rawRoleId,
-            folder: p.folder,
-            path: p.path,
-            index: p.index,
+            folder: part.folder,
+            path: resolvedUrl,
+            index: part.index ?? modelIndex,
           };
-          m.visible = false;
-          m.anchor.set(0.5);
 
-          // 基准缩放（尽量完整显示）
-          const baseScaleX = app.screen.width / m.width;
-          const baseScaleY = app.screen.height / m.height;
+          taggedModel.anchor?.set?.(0.5);
+
+          const baseScaleX = app.screen.width / taggedModel.width;
+          const baseScaleY = app.screen.height / taggedModel.height;
           const base = Math.min(baseScaleX, baseScaleY);
-          const sx = base * (p.xscale ?? 1);
-          const sy = base * (p.yscale ?? 1);
-          m.scale.set(sx, sy);
+          taggedModel.scale.set(base * (part.xscale ?? 1), base * (part.yscale ?? 1));
+          taggedModel.position.set(part.x ?? 0, part.y ?? 0);
 
-          // 相对容器中心的位�?
-          m.position.set(p.x ?? 0, p.y ?? 0);
-
-          const im: any = (m as any).internalModel;
-          if (im) {
-            if (typeof im.angleXParamIndex === "number") im.angleXParamIndex = 999;
-            if (typeof im.angleYParamIndex === "number") im.angleYParamIndex = 999;
-            if (typeof im.angleZParamIndex === "number") im.angleZParamIndex = 999;
-            if (im?.eyeBlink) {
-              im.eyeBlink.blinkInterval = 1000 * 60 * 60 * 24;
-              im.eyeBlink.nextBlinkTimeLeft = 1000 * 60 * 60 * 24;
-            }
-            if (summary.import != null) {
-              try { im.coreModel?.setParamFloat?.("PARAM_IMPORT", Number(summary.import)); } catch {}
-            }
-          }
-
-          group.addChild(m);
-          children.push(m);
-        } catch (e) {
-          console.warn("子模型加载失�?", p.path, e);
-        }
-      }
-
-      // 统一显示
-      children.forEach((m) => (m.visible = true));
-
-      // 拖拽容器
-      if (enableDragging) makeDraggableContainer(group);
-
-      // 计算联合包围盒（用于裁剪录制�?
-      requestAnimationFrame(() => {
-        const b = group.getBounds();
-        setCustomRecordingBounds({
-          x: Math.max(0, b.x),
-          y: Math.max(0, b.y),
-          width: Math.min(b.width, app.screen.width),
-          height: Math.min(b.height, app.screen.height),
-        });
+          disableModelAutoBehaviors(taggedModel);
+        },
       });
 
-      // 合成 modelData：从第一只子模型�?model.json 过滤
-      let synth: ModelData | null = null;
-      try {
-        const firstModelJson = await (await fetch(parts[0].path, { cache: "no-cache" })).json();
-        const fullMotions = firstModelJson?.motions ?? {};
-        const motionGroups = summary.motions?.length ? summary.motions : Object.keys(fullMotions);
+      groupContainerRef.current = loaded.container;
+      app.stage.addChild(loaded.container);
 
-        const motionsFiltered: Record<string, Motion[]> = {};
-        for (const g of motionGroups) {
-          const arr = fullMotions[g] || [];
-          motionsFiltered[g] = arr.map((it: any, i: number) => ({
-            name: it?.name ?? `${g}-${i}`,
-            file: it?.file,
-          }));
-        }
-
-        const fullExpr = firstModelJson?.expressions ?? [];
-        const expressions: Expression[] = summary.expressions?.length
-          ? fullExpr.filter((e: any) => summary.expressions!.includes(e?.name)).map((e: any) => ({ name: e?.name, file: e?.file }))
-          : fullExpr.map((e: any) => ({ name: e?.name, file: e?.file }));
-
-        synth = { motions: motionsFiltered, expressions };
-      } catch (e) {
-        console.warn("Failed to synthesize modelData", e);
-        synth = { motions: {}, expressions: [] };
+      if (enableDragging) {
+        makeDraggableContainer(loaded.container as DraggableDisplayObject);
       }
 
-      setModelData(synth);
-      modelRef.current = children;     // 存为数组
+      requestAnimationFrame(() => {
+        updateBoundsFromDisplayObject(loaded.container);
+      });
+
+      const children = loaded.models as unknown as Live2DModel[];
+      const firstModel = children[0] as JsonlLive2DModel | undefined;
+      const firstModelUrl = firstModel?.__compositeResolvedUrl;
+
+      if (!firstModelUrl) {
+        throw new Error(`无法解析首个子模型路径: ${jsonlUrl}`);
+      }
+
+      motionBaseRef.current = firstModelUrl.slice(0, firstModelUrl.lastIndexOf("/") + 1);
+
+      try {
+        const synthesized = await synthesizeCompositeModelData(loaded.selectors, firstModelUrl);
+        setModelData(synthesized);
+      } catch (error) {
+        console.warn("Failed to synthesize composite modelData", error);
+        setModelData({ motions: {}, expressions: [] });
+      }
+
+      modelRef.current = children;
       isCompositeRef.current = true;
       
     } catch (err) {

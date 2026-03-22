@@ -13,9 +13,6 @@ interface ExportToolbarProps {
   onStopRecording: () => void;
   onSaveWebM: () => void;
   onConvertToMov: () => void;
-  onStartOfflineExport: () => void;
-  onStartSubtitleOnlyExport: () => void;
-  onStartLive2DOnlyExport: () => void;
   onExportSubtitlesSrt: () => void;
   onTakeScreenshot: () => void;
   onTakePartsScreenshots: () => void;

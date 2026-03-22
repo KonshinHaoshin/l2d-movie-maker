@@ -76,6 +76,8 @@ type Props = {
   characterOptions: CharacterOption[];
   selectedCharacterId: string;
   onSelectCharacter: (id: string) => void;
+  isCharacterVisible: boolean;
+  onToggleCharacterVisibility: (visible: boolean) => void;
   characterTransform: CharacterTransform;
   onUpdateCharacterTransform: (patch: Partial<CharacterTransform>) => void;
 
@@ -102,9 +104,6 @@ type Props = {
   onStopRecording: () => void;
   onSaveWebM: () => void;
   onConvertToMov: () => void;
-  onStartOfflineExport: () => void;
-  onStartSubtitleOnlyExport: () => void;
-  onStartLive2DOnlyExport: () => void;
   onExportSubtitlesSrt: () => void;
   onTakeScreenshot: () => void;
   onTakePartsScreenshots: () => void;
@@ -214,6 +213,8 @@ export default function ControlPanel(props: Props) {
     characterOptions,
     selectedCharacterId,
     onSelectCharacter,
+    isCharacterVisible,
+    onToggleCharacterVisibility,
     characterTransform,
     onUpdateCharacterTransform,
     enableDragging,
@@ -239,9 +240,6 @@ export default function ControlPanel(props: Props) {
     onStopRecording,
     onSaveWebM,
     onConvertToMov,
-    onStartOfflineExport,
-    onStartSubtitleOnlyExport,
-    onStartLive2DOnlyExport,
     onExportSubtitlesSrt,
     onTakeScreenshot,
     onTakePartsScreenshots,
@@ -588,8 +586,8 @@ export default function ControlPanel(props: Props) {
           <>
             {activeInspectorTab === "character" ? (
               <>
-                {hasMultipleCharacters ? (
-                  <PanelSection title="角色">
+                <PanelSection title="角色">
+                  {hasMultipleCharacters ? (
                     <div className="field-stack">
                       <label className="field-label" htmlFor="inspector-role-select">
                         当前编辑目标
@@ -607,8 +605,17 @@ export default function ControlPanel(props: Props) {
                         ))}
                       </select>
                     </div>
-                  </PanelSection>
-                ) : null}
+                  ) : null}
+
+                  <label className="switch-row">
+                    <input
+                      type="checkbox"
+                      checked={isCharacterVisible}
+                      onChange={(event) => onToggleCharacterVisibility(event.target.checked)}
+                    />
+                    <span>{isCharacterVisible ? "显示当前角色" : "隐藏当前角色"}</span>
+                  </label>
+                </PanelSection>
 
                 <PanelSection title="变换">
                   <div className="transform-grid">
@@ -797,9 +804,6 @@ export default function ControlPanel(props: Props) {
                     onStopRecording={onStopRecording}
                     onSaveWebM={onSaveWebM}
                     onConvertToMov={onConvertToMov}
-                    onStartOfflineExport={onStartOfflineExport}
-                    onStartSubtitleOnlyExport={onStartSubtitleOnlyExport}
-                    onStartLive2DOnlyExport={onStartLive2DOnlyExport}
                     onExportSubtitlesSrt={onExportSubtitlesSrt}
                     onTakeScreenshot={onTakeScreenshot}
                     onTakePartsScreenshots={onTakePartsScreenshots}
