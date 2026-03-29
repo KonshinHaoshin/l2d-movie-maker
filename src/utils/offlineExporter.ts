@@ -6,6 +6,7 @@ type AudioTrack = {
   id: string;
   start: number;
   duration: number;
+  sourceDuration?: number;
   audioUrl?: string;
   audioPath?: string;
 };
@@ -53,7 +54,10 @@ function buildAudioManifest(audioTracks: AudioTrack[], fps: number): AudioManife
 
   for (const track of audioTracks) {
     const start = Math.max(0, Number(track.start) || 0);
-    const duration = Math.max(0, Number(track.duration) || 0);
+    const duration = Math.min(
+      Math.max(0, Number(track.duration) || 0),
+      Math.max(0, Number(track.sourceDuration ?? track.duration) || 0),
+    );
     if (duration <= 0) continue;
 
     const source = (track.audioPath && track.audioPath.trim().length > 0)

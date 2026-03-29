@@ -169,6 +169,7 @@
 }
 
 .workspace-pane-scroll,
+.tl-root,
 .tl-timearea,
 .asset-list {
   scrollbar-width: thin;
@@ -176,6 +177,7 @@
 }
 
 .workspace-pane-scroll::-webkit-scrollbar,
+.tl-root::-webkit-scrollbar,
 .tl-timearea::-webkit-scrollbar,
 .asset-list::-webkit-scrollbar {
   width: 12px;
@@ -183,6 +185,7 @@
 }
 
 .workspace-pane-scroll::-webkit-scrollbar-track,
+.tl-root::-webkit-scrollbar-track,
 .tl-timearea::-webkit-scrollbar-track,
 .asset-list::-webkit-scrollbar-track {
   background: var(--scroll-track);
@@ -191,6 +194,7 @@
 }
 
 .workspace-pane-scroll::-webkit-scrollbar-thumb,
+.tl-root::-webkit-scrollbar-thumb,
 .tl-timearea::-webkit-scrollbar-thumb,
 .asset-list::-webkit-scrollbar-thumb {
   background: var(--scroll-thumb);
@@ -203,18 +207,21 @@
 }
 
 .workspace-pane-scroll::-webkit-scrollbar-thumb:hover,
+.tl-root::-webkit-scrollbar-thumb:hover,
 .tl-timearea::-webkit-scrollbar-thumb:hover,
 .asset-list::-webkit-scrollbar-thumb:hover {
   background: var(--scroll-thumb-hover);
 }
 
 .workspace-pane-scroll::-webkit-scrollbar-thumb:active,
+.tl-root::-webkit-scrollbar-thumb:active,
 .tl-timearea::-webkit-scrollbar-thumb:active,
 .asset-list::-webkit-scrollbar-thumb:active {
   background: var(--scroll-thumb-active);
 }
 
 .workspace-pane-scroll::-webkit-scrollbar-corner,
+.tl-root::-webkit-scrollbar-corner,
 .tl-timearea::-webkit-scrollbar-corner,
 .asset-list::-webkit-scrollbar-corner {
   background: var(--scroll-corner);
@@ -407,6 +414,10 @@
 
 .button-row {
   justify-content: flex-start;
+}
+
+.button-row .btn {
+  white-space: nowrap;
 }
 
 .asset-list {
@@ -933,6 +944,8 @@
   border-radius: 20px;
   background: linear-gradient(180deg, rgba(20, 27, 36, 0.98), rgba(15, 21, 29, 0.99));
   box-shadow: var(--shadow-sm);
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .tl-header {
@@ -987,8 +1000,8 @@
 }
 
 .tl-layout {
-  flex: 1 1 auto;
-  min-height: 0;
+  flex: 0 0 auto;
+  min-height: 282px;
   display: grid;
   grid-template-columns: 136px minmax(0, 1fr);
   overflow: hidden;
@@ -1109,9 +1122,55 @@
   overflow: hidden;
 }
 
+.tl-audio-visual {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.92;
+}
+
+.tl-audio-waveform {
+  position: absolute;
+  inset: 0 auto 0 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 14px;
+  overflow: hidden;
+}
+
+.tl-audio-peak {
+  flex: 1 1 0;
+  align-self: center;
+  min-width: 2px;
+  border-radius: 999px;
+  background: rgba(255, 244, 231, 0.88);
+}
+
+.tl-audio-tail {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(35, 23, 12, 0.28);
+  border-left: 1px dashed rgba(255, 234, 210, 0.44);
+}
+
+.tl-audio-tail span {
+  padding: 0 12px;
+  font-size: 0.7rem;
+  color: rgba(255, 242, 229, 0.86);
+  white-space: nowrap;
+}
+
 .tl-clip-copy {
   min-width: 0;
   flex: 1 1 auto;
+  position: relative;
+  z-index: 1;
 }
 
 .tl-clip-name {
@@ -1154,6 +1213,8 @@
   color: var(--text);
   font-size: 1rem;
   cursor: pointer;
+  position: relative;
+  z-index: 2;
 }
 
 .tl-playhead-global {

@@ -53,6 +53,8 @@ const EXPORT_PROGRESS_UI_INTERVAL_MS = 100;
 const DEFAULT_SUBTITLE_FONT_FAMILY = "Microsoft YaHei";
 const DEFAULT_SUBTITLE_FONT_SIZE = 34;
 const DEFAULT_SUBTITLE_TEXT_COLOR = "#ffffff";
+const AUDIO_WAVEFORM_PEAK_COUNT = 56;
+const AUDIO_END_GUARD_SEC = 0.03;
 
 declare global {
   interface Window {
@@ -435,6 +437,66 @@ export default function Live2DView() {
     linkedAudioClipId: options.linkedAudioClipId,
   });
 
+  const getAudioAudibleDuration = (clip: Clip) =>
+    Math.min(
+      Math.max(0, Number(clip.duration) || 0),
+      Math.max(0, Number(clip.audioSourceDuration ?? clip.duration) || 0),
+    );
+
+  const buildWaveformPeaks = (buffer: AudioBuffer, peakCount = AUDIO_WAVEFORM_PEAK_COUNT) => {
+    const channelData = buffer.getChannelData(0);
+    if (channelData.length === 0) return [];
+
+    const blockSize = Math.max(1, Math.floor(channelData.length / peakCount));
+    const peaks: number[] = [];
+    let maxPeak = 0;
+
+    for (let index = 0; index < peakCount; index += 1) {
+      const start = index * blockSize;
+      const end = Math.min(channelData.length, start + blockSize);
+      let peak = 0;
+
+      for (let sampleIndex = start; sampleIndex < end; sampleIndex += 1) {
+        peak = Math.max(peak, Math.abs(channelData[sampleIndex] ?? 0));
+      }
+
+      peaks.push(peak);
+      maxPeak = Math.max(maxPeak, peak);
+    }
+
+    if (maxPeak <= 0) {
+      return peaks.map(() => 0.18);
+    }
+
+    return peaks.map((peak) => Math.max(0.12, peak / maxPeak));
+  };
+
+  const analyzeAudioSource = async (audioUrl: string, fallbackDuration: number) => {
+    const context = audioManager.audioContextRef.current;
+    if (!context) {
+      return { audioSourceDuration: fallbackDuration, waveformPeaks: undefined as number[] | undefined };
+    }
+
+    try {
+      const response = await fetch(audioUrl);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const arrayBuffer = await response.arrayBuffer();
+      const audioBuffer = await context.decodeAudioData(arrayBuffer.slice(0));
+      return {
+        audioSourceDuration: Number.isFinite(audioBuffer.duration) && audioBuffer.duration > 0
+          ? audioBuffer.duration
+          : fallbackDuration,
+        waveformPeaks: buildWaveformPeaks(audioBuffer),
+      };
+    } catch (error) {
+      console.warn("音频波形分析失败", error);
+      return { audioSourceDuration: fallbackDuration, waveformPeaks: undefined as number[] | undefined };
+    }
+  };
+
   const resetTimelineTriggerState = () => {
     activeMotionClipIdRef.current = null;
     activeExprClipIdRef.current = null;
@@ -714,8 +776,70 @@ export default function Live2DView() {
     setExprClips((prev) => [...prev, { id: crypto.randomUUID(), name, start: nextEnd(prev), duration: exprDur }]);
   };
 
+  const registerAudioElement = (clipId: string, audioUrl: string) => {
+    const audioElement = new Audio(audioUrl);
+    audioElement.crossOrigin = "anonymous";
+    audioElement.preload = "auto";
+    audioElement.volume = 0.8;
+    audioManager.audioRefs.current.set(clipId, audioElement);
+
+    if (audioManager.audioContextRef.current) {
+      try {
+        const source = audioManager.audioContextRef.current.createMediaElementSource(audioElement);
+        const analyzer = audioManager.audioContextRef.current.createAnalyser();
+        analyzer.fftSize = 256;
+        analyzer.smoothingTimeConstant = 0.8;
+
+        source.connect(analyzer);
+        analyzer.connect(audioManager.audioContextRef.current.destination);
+
+        audioManager.audioAnalyzersRef.current.set(clipId, { source, analyzer });
+      } catch (error) {
+        console.warn("音频分析器初始化失败", error);
+      }
+    }
+
+    return audioElement;
+  };
+
+  const syncPreviewAudioAtTime = (timeSec: number) => {
+    audioClips.forEach((clip) => {
+      const audioElement = audioManager.audioRefs.current.get(clip.id);
+      if (!audioElement) return;
+
+      const audibleDuration = getAudioAudibleDuration(clip);
+      const playbackCeiling = Math.max(0, audibleDuration - AUDIO_END_GUARD_SEC);
+      if (audibleDuration <= 0) {
+        if (!audioElement.paused) {
+          audioElement.pause();
+        }
+        audioElement.currentTime = 0;
+        return;
+      }
+
+      const clipOffset = timeSec - clip.start;
+      if (clipOffset >= 0 && clipOffset < playbackCeiling) {
+        const playbackTime = Math.max(0, Math.min(clipOffset, playbackCeiling));
+        if (audioElement.paused) {
+          audioElement.currentTime = playbackTime;
+          audioElement.play().catch((error) => {
+            console.warn("音频播放失败", error);
+          });
+        } else if (Math.abs(audioElement.currentTime - playbackTime) > 0.25) {
+          audioElement.currentTime = playbackTime;
+        }
+        return;
+      }
+
+      if (!audioElement.paused) {
+        audioElement.pause();
+      }
+      audioElement.currentTime = 0;
+    });
+  };
+
   // ????????
-    const addAudioClip = async () => {
+  const addAudioClip = async () => {
     try {
       audioManager.initAudioContext();
 
@@ -750,31 +874,16 @@ export default function Live2DView() {
         name: clipName,
         start: nextEnd(audioClips),
         duration,
+        audioSourceDuration: duration,
         audioUrl,
         audioPath
       };
 
-      const audioElement = new Audio(audioUrl);
-      audioElement.crossOrigin = "anonymous";
-      audioElement.preload = 'auto';
-      audioElement.volume = 0.8;
-      audioManager.audioRefs.current.set(audioClip.id, audioElement);
+      const audioMeta = await analyzeAudioSource(audioUrl, duration);
+      audioClip.audioSourceDuration = audioMeta.audioSourceDuration;
+      audioClip.waveformPeaks = audioMeta.waveformPeaks;
 
-      if (audioManager.audioContextRef.current) {
-        try {
-          const source = audioManager.audioContextRef.current.createMediaElementSource(audioElement);
-          const analyzer = audioManager.audioContextRef.current.createAnalyser();
-          analyzer.fftSize = 256;
-          analyzer.smoothingTimeConstant = 0.8;
-
-          source.connect(analyzer);
-          analyzer.connect(audioManager.audioContextRef.current.destination);
-
-          audioManager.audioAnalyzersRef.current.set(audioClip.id, { source, analyzer });
-        } catch (error) {
-          console.warn('??????????', error);
-        }
-      }
+      registerAudioElement(audioClip.id, audioUrl);
 
       setAudioClips(prev => [...prev, audioClip]);
     } catch (error) {
@@ -809,9 +918,18 @@ export default function Live2DView() {
     renderSubtitleClip(findActiveClip(subtitleClips, t) as SubtitleClip | null);
 
     if (!offline) {
-      // ??????????
-      audioManager.playAudioAtTime(t);
-      audioManager.processAudioAnimation(t);
+      const hasAudibleAudio = audioClips.some((clip) => {
+        const audibleDuration = getAudioAudibleDuration(clip);
+        const playbackCeiling = Math.max(0, audibleDuration - AUDIO_END_GUARD_SEC);
+        const clipOffset = t - clip.start;
+        return clipOffset >= 0 && clipOffset < playbackCeiling;
+      });
+      syncPreviewAudioAtTime(t);
+      if (hasAudibleAudio) {
+        audioManager.processAudioAnimation(t);
+      } else {
+        setCurrentAudioLevel(0);
+      }
     }
   };
 
@@ -1102,6 +1220,7 @@ export default function Live2DView() {
           id: c.id,
           start: c.start,
           duration: c.duration,
+          sourceDuration: c.audioSourceDuration,
           audioUrl: c.audioUrl,
           audioPath: c.audioPath
         })),
@@ -1196,29 +1315,7 @@ export default function Live2DView() {
     }
   };
 
-  const createImportedAudioElement = (clipId: string, audioUrl: string) => {
-    const audioElement = new Audio(audioUrl);
-    audioElement.crossOrigin = "anonymous";
-    audioElement.preload = "auto";
-    audioElement.volume = 0.8;
-    audioManager.audioRefs.current.set(clipId, audioElement);
-
-    if (audioManager.audioContextRef.current) {
-      try {
-        const source = audioManager.audioContextRef.current.createMediaElementSource(audioElement);
-        const analyzer = audioManager.audioContextRef.current.createAnalyser();
-        analyzer.fftSize = 256;
-        analyzer.smoothingTimeConstant = 0.8;
-        source.connect(analyzer);
-        analyzer.connect(audioManager.audioContextRef.current.destination);
-        audioManager.audioAnalyzersRef.current.set(clipId, { source, analyzer });
-      } catch (error) {
-        console.warn("WebGAL 音频分析器初始化失败", error);
-      }
-    }
-
-    return audioElement;
-  };
+  const createImportedAudioElement = (clipId: string, audioUrl: string) => registerAudioElement(clipId, audioUrl);
 
   const buildImportedAudioName = (speaker?: string, text?: string) => {
     const trimmedText = (text ?? "").trim();
@@ -1267,13 +1364,18 @@ export default function Live2DView() {
       let timelineCursor = 0;
 
       for (const group of plan.groups) {
-        const duration =
-          group.durationHintSec ??
+        const baseDuration =
           group.audioDurationSec ??
           (group.motion ? importedMotionDurations[group.motion] : undefined) ??
           (group.motion ? motionLen[group.motion] : undefined) ??
           motionDur ??
           exprDur;
+        const duration = plan.extendClipToSpokenSpan
+          ? (group.durationHintSec ?? baseDuration)
+          : baseDuration;
+        const subtitleDuration =
+          group.audioDurationSec ??
+          baseDuration;
 
         if (group.motion) {
           nextMotionClips.push({
@@ -1299,20 +1401,23 @@ export default function Live2DView() {
           const clipId = crypto.randomUUID();
           const audioUrl = await buildWebGALExternalAssetUrl(plan.projectRoot, group.audioAbsolutePath);
           createImportedAudioElement(clipId, audioUrl);
+          const audioMeta = await analyzeAudioSource(audioUrl, group.audioDurationSec ?? duration);
           nextAudioClips.push({
             id: clipId,
             name: buildImportedAudioName(group.speaker, group.text),
             start: timelineCursor,
             duration,
+            audioSourceDuration: audioMeta.audioSourceDuration,
             audioUrl,
             audioPath: group.audioAbsolutePath,
+            waveformPeaks: audioMeta.waveformPeaks,
           });
           linkedAudioClipId = clipId;
         }
 
         if (plan.includeSubtitles && group.text?.trim()) {
           nextSubtitleClips.push(
-            createSubtitleClip(group.text.trim(), timelineCursor, duration, {
+            createSubtitleClip(group.text.trim(), timelineCursor, subtitleDuration, {
               linkedAudioClipId,
               speakerName: group.speaker,
             }),

@@ -98,6 +98,7 @@ export default function WebGALMode({
   const [roleMappingEditorText, setRoleMappingEditorText] = useState("{}");
   const [roleMappingEditorError, setRoleMappingEditorError] = useState("");
   const [includeSubtitles, setIncludeSubtitles] = useState(true);
+  const [extendClipToSpokenSpan, setExtendClipToSpokenSpan] = useState(true);
 
   const parserStateLabel = error
     ? "解析异常"
@@ -474,6 +475,7 @@ export default function WebGALMode({
       selectedRoleLabel: selectedRoleSummary.label,
       selectedFigurePath,
       includeSubtitles,
+      extendClipToSpokenSpan,
       previewGroups,
     });
 
@@ -693,6 +695,18 @@ export default function WebGALMode({
                       <span>
                         导入对白字幕
                         <small>对白文本会生成字幕轨，并与动作、表情、语音保持同起止时长。</small>
+                      </span>
+                    </label>
+
+                    <label className="webgal-toggle-row">
+                      <input
+                        type="checkbox"
+                        checked={extendClipToSpokenSpan}
+                        onChange={(event) => setExtendClipToSpokenSpan(event.target.checked)}
+                      />
+                      <span>
+                        片段延长覆盖插话
+                        <small>勾选后动作和字幕会延长到后续对白结束，但语音只播放原始长度。</small>
                       </span>
                     </label>
                   </>

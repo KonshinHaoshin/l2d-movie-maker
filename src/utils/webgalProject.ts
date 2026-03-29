@@ -72,6 +72,7 @@ export type WebGALImportPlan = {
   selectedRoleLabel: string;
   selectedFigurePath: string;
   includeSubtitles: boolean;
+  extendClipToSpokenSpan: boolean;
   groups: WebGALImportGroup[];
 };
 
@@ -552,6 +553,7 @@ export function createWebGALImportPlan(args: {
   selectedRoleLabel: string;
   selectedFigurePath: string;
   includeSubtitles: boolean;
+  extendClipToSpokenSpan: boolean;
   previewGroups: WebGALPreviewGroup[];
 }): WebGALImportPlan {
   return {
@@ -561,6 +563,7 @@ export function createWebGALImportPlan(args: {
     selectedRoleLabel: args.selectedRoleLabel,
     selectedFigurePath: args.selectedFigurePath,
     includeSubtitles: args.includeSubtitles,
+    extendClipToSpokenSpan: args.extendClipToSpokenSpan,
     groups: args.previewGroups
       .filter((group) => !group.skipReason)
       .map((group) => ({

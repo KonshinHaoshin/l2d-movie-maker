@@ -39,6 +39,13 @@ const trackConfig: Record<TrackKind, { label: string; sublabel: string; color: s
   subtitle: { label: "字幕轨", sublabel: "Subtitle", color: "#c96a6a" },
 };
 
+function getAudioAudibleRatio(clip: Clip) {
+  const duration = Math.max(0, Number(clip.duration) || 0);
+  if (duration <= 0) return 1;
+  const sourceDuration = Math.max(0, Number(clip.audioSourceDuration ?? clip.duration) || 0);
+  return Math.max(0, Math.min(1, sourceDuration / duration));
+}
+
 export default function Timeline({
   motionClips,
   exprClips,
@@ -99,10 +106,18 @@ export default function Timeline({
     const wheelListenerOptions: AddEventListenerOptions = { passive: false };
 
     const onWheel = (event: WheelEvent) => {
-      if (!event.altKey) return;
-      event.preventDefault();
-      const factor = event.deltaY > 0 ? 0.9 : 1.1;
-      setPps(pps * factor);
+      if (event.altKey) {
+        event.preventDefault();
+        const factor = event.deltaY > 0 ? 0.9 : 1.1;
+        setPps(pps * factor);
+        return;
+      }
+
+      if (event.shiftKey) {
+        event.preventDefault();
+        const delta = Math.abs(event.deltaX) > 0 ? event.deltaX : event.deltaY;
+        timeArea.scrollLeft += delta;
+      }
     };
     timeArea.addEventListener("wheel", onWheel, wheelListenerOptions);
     return () => timeArea.removeEventListener("wheel", onWheel, wheelListenerOptions);
@@ -233,6 +248,8 @@ export default function Timeline({
             {clips.map((clip) => {
               const left = clip.start * pps;
               const width = Math.max(pps * clip.duration, 28);
+              const audioAudibleRatio = track === "audio" ? getAudioAudibleRatio(clip) : 1;
+              const waveformPeaks = track === "audio" ? (clip.waveformPeaks ?? []) : [];
               return (
                 <div
                   key={clip.id}
@@ -257,6 +274,25 @@ export default function Timeline({
                     if (onStartPlayback && !isPlaying) onStartPlayback();
                   }}
                 >
+                  {track === "audio" ? (
+                    <div className="tl-audio-visual" aria-hidden="true">
+                      <div className="tl-audio-waveform" style={{ width: `${audioAudibleRatio * 100}%` }}>
+                        {waveformPeaks.map((peak, index) => (
+                          <span
+                            key={`${clip.id}-peak-${index}`}
+                            className="tl-audio-peak"
+                            style={{ height: `${Math.max(16, peak * 100)}%` }}
+                          />
+                        ))}
+                      </div>
+                      {audioAudibleRatio < 1 ? (
+                        <div className="tl-audio-tail" style={{ left: `${audioAudibleRatio * 100}%` }}>
+                          <span>延长静音</span>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+
                   <div
                     className="tl-handle tl-handle--l"
                     style={{ width: HANDLE_W }}

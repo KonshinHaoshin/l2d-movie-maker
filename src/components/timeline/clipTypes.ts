@@ -5,6 +5,8 @@ export type Clip = {
   duration: number;
   audioUrl?: string;
   audioPath?: string;
+  audioSourceDuration?: number;
+  waveformPeaks?: number[];
   audioBuffer?: AudioBuffer;
 };
 
