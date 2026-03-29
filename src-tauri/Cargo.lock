@@ -76,25 +76,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
-name = "app"
-version = "1.2.0"
-dependencies = [
- "fontdb",
- "glob",
- "log",
- "mime_guess",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-fs",
- "tauri-plugin-log",
- "tiny_http",
- "urlencoding",
-]
-
-[[package]]
 name = "arrayvec"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1774,6 +1755,25 @@ dependencies = [
  "html5ever",
  "indexmap 2.13.0",
  "selectors",
+]
+
+[[package]]
+name = "l2d-movie-maker"
+version = "1.2.1"
+dependencies = [
+ "fontdb",
+ "glob",
+ "log",
+ "mime_guess",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-fs",
+ "tauri-plugin-log",
+ "tiny_http",
+ "urlencoding",
 ]
 
 [[package]]

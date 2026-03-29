@@ -467,10 +467,23 @@ export async function buildWebGALPreviewGroups({
   let currentMotion: string | undefined;
   let currentExpression: string | undefined;
   let currentFigurePath: string | undefined;
-  let currentStart = 0;
+  let spokenTimelineCursor = 0;
   let groupIndex = 0;
 
   const groups: WebGALPreviewGroup[] = [];
+  let pendingGroup: WebGALPreviewGroup | null = null;
+
+  const defaultDialogueDuration = defaultMotionDuration ?? defaultExpressionDuration;
+
+  const finalizePendingGroup = (endSec: number) => {
+    if (!pendingGroup) return;
+    pendingGroup.durationSec = Math.max(
+      pendingGroup.durationSec,
+      endSec - pendingGroup.startSec,
+    );
+    groups.push(pendingGroup);
+    pendingGroup = null;
+  };
 
   for (const command of commands) {
     if (command.type === "changeFigure" && command.data.id === selectedRoleId) {
@@ -480,7 +493,7 @@ export async function buildWebGALPreviewGroups({
       continue;
     }
 
-    if (command.type !== "dialogue" || command.data.figureId !== selectedRoleId) {
+    if (command.type !== "dialogue") {
       continue;
     }
 
@@ -489,40 +502,46 @@ export async function buildWebGALPreviewGroups({
       audioAbsolutePath && projectRoot
         ? await probeAudioDuration(projectRoot, audioAbsolutePath)
         : undefined;
-    const fallbackDuration =
-      (currentMotion ? motionDurationMap[currentMotion] : undefined) ??
-      defaultMotionDuration ??
-      defaultExpressionDuration;
+    const isSelectedRoleDialogue = command.data.figureId === selectedRoleId;
+    const fallbackDuration = isSelectedRoleDialogue
+      ? (
+          (currentMotion ? motionDurationMap[currentMotion] : undefined) ??
+          defaultMotionDuration ??
+          defaultExpressionDuration
+        )
+      : defaultDialogueDuration;
+    const dialogueDurationSec = audioDurationSec ?? fallbackDuration;
 
-    const skipReason =
-      currentFigurePath && selectedFigurePath && currentFigurePath !== selectedFigurePath
-        ? `当前立绘为 ${currentFigurePath}，不属于本次导入立绘`
-        : undefined;
+    if (isSelectedRoleDialogue) {
+      finalizePendingGroup(spokenTimelineCursor);
 
-    const durationSec = audioDurationSec ?? fallbackDuration;
+      const skipReason =
+        currentFigurePath && selectedFigurePath && currentFigurePath !== selectedFigurePath
+          ? `当前立绘为 ${currentFigurePath}，不属于本次导入立绘`
+          : undefined;
 
-    groups.push({
-      index: groupIndex,
-      startSec: currentStart,
-      durationSec,
-      lineNumber: command.lineNumber,
-      speaker: command.data.speaker,
-      text: command.data.text,
-      motion: currentMotion,
-      expression: currentExpression,
-      figurePath: currentFigurePath,
-      audioRelativePath: command.data.audioPath,
-      audioAbsolutePath,
-      audioDurationSec,
-      skipReason,
-    });
-
-    if (!skipReason) {
-      currentStart += durationSec;
+      pendingGroup = {
+        index: groupIndex,
+        startSec: spokenTimelineCursor,
+        durationSec: dialogueDurationSec,
+        lineNumber: command.lineNumber,
+        speaker: command.data.speaker,
+        text: command.data.text,
+        motion: currentMotion,
+        expression: currentExpression,
+        figurePath: currentFigurePath,
+        audioRelativePath: command.data.audioPath,
+        audioAbsolutePath,
+        audioDurationSec,
+        skipReason,
+      };
+      groupIndex += 1;
     }
-    groupIndex += 1;
+
+    spokenTimelineCursor += dialogueDurationSec;
   }
 
+  finalizePendingGroup(spokenTimelineCursor);
   return groups;
 }
 

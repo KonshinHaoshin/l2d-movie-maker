@@ -711,7 +711,7 @@ export default function WebGALMode({
         <div className="webgal-actions">
           <div className="webgal-actions-copy">
             <strong>导入单角色时间线</strong>
-            <span>当前会替换现有时间线内容，并把选定立绘加载到预览区。语音优先决定组时长，没有语音时按动作时长回退。</span>
+            <span>当前会替换现有时间线内容，并把选定立绘加载到预览区。单角色片段时长会从该角色当前一句开始，持续到该角色下一句开始前，期间会包含其他角色的说话时长；没有语音时再按动作时长回退。</span>
           </div>
           <div className="webgal-actions-buttons">
             <button

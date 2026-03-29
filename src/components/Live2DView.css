@@ -998,7 +998,7 @@
 
 .tl-side {
   display: grid;
-  grid-template-rows: 34px repeat(3, 62px);
+  grid-template-rows: 34px repeat(4, 62px);
   background: linear-gradient(180deg, rgba(24, 32, 41, 0.98), rgba(18, 24, 32, 0.98));
   border-right: 1px solid rgba(67, 84, 103, 0.34);
 }

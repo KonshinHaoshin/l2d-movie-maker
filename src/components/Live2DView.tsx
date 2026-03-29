@@ -46,6 +46,7 @@ type RendererWithBackground = PIXI.Renderer & {
   gl?: WebGLRenderingContext | WebGL2RenderingContext | null;
 };
 type ExportVisualMode = "all" | "subtitle-only" | "live2d-only";
+type SubtitleSpeakerAlign = "left" | "center" | "right";
 const PLAYHEAD_UI_INTERVAL_MS = 1000 / 30;
 const EXPORT_PROGRESS_UI_INTERVAL_MS = 100;
 const DEFAULT_SUBTITLE_FONT_FAMILY = "Microsoft YaHei";
@@ -65,6 +66,9 @@ export default function Live2DView() {
   // ????????????????
   const modelRef = useRef<Live2DModel | Live2DModel[] | null>(null);
   const appRef = useRef<PIXI.Application | null>(null);
+  const subtitleContainerRef = useRef<PIXI.Container | null>(null);
+  const subtitleSpeakerTextRef = useRef<PIXI.Text | null>(null);
+  const subtitleSpeakerUnderlineRef = useRef<PIXI.Graphics | null>(null);
   const subtitleTextRef = useRef<PIXI.Text | null>(null);
 
   // ????jsonl?????????MTN ??????
@@ -78,7 +82,7 @@ export default function Live2DView() {
   // ??????? ???//
   const [modelList, setModelList] = useState<string[]>([]);
   const [selectedModel, setSelectedModel] = useState<string | null>(null); // ?? "anon/model.json" ??"xxx/model.jsonl"
-  const [externalModelDisplayName, setExternalModelDisplayName] = useState<string | null>(null);
+  const [, setExternalModelDisplayName] = useState<string | null>(null);
   const modelUrl = selectedModel && assetBase ? `${assetBase}/${selectedModel}` : null; // ???URL
 
   // ????????? ???//
@@ -94,6 +98,8 @@ export default function Live2DView() {
   const [audioClips, setAudioClips] = useState<Clip[]>([]); // ??????
   const [subtitleClips, setSubtitleClips] = useState<SubtitleClip[]>([]);
   const [showSubtitles, setShowSubtitles] = useState(true);
+  const [showSubtitleSpeaker, setShowSubtitleSpeaker] = useState(false);
+  const [subtitleSpeakerAlign, setSubtitleSpeakerAlign] = useState<SubtitleSpeakerAlign>("center");
   const [playhead, setPlayhead] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentAudioLevel, setCurrentAudioLevel] = useState(0); // ??????
@@ -311,13 +317,14 @@ export default function Live2DView() {
     text: string,
     start: number,
     duration: number,
-    options: { linkedAudioClipId?: string } = {},
+    options: { linkedAudioClipId?: string; speakerName?: string } = {},
   ): SubtitleClip => ({
     id: crypto.randomUUID(),
     name: buildSubtitleClipName(text),
     start,
     duration,
     subtitleText: text,
+    speakerName: options.speakerName?.trim() || undefined,
     fontFamily: DEFAULT_SUBTITLE_FONT_FAMILY,
     fontSize: DEFAULT_SUBTITLE_FONT_SIZE,
     textColor: DEFAULT_SUBTITLE_TEXT_COLOR,
@@ -342,10 +349,11 @@ export default function Live2DView() {
 
   const syncSubtitleDisplayLayout = () => {
     const app = appRef.current;
+    const subtitleContainer = subtitleContainerRef.current;
     const subtitleText = subtitleTextRef.current;
-    if (!app || !subtitleText) return;
+    if (!app || !subtitleContainer || !subtitleText) return;
 
-    subtitleText.position.set(app.screen.width / 2, app.screen.height - 36);
+    subtitleContainer.position.set(app.screen.width / 2, app.screen.height - 36);
     subtitleText.style.wordWrap = true;
     subtitleText.style.wordWrapWidth = Math.max(320, app.screen.width - 140);
   };
@@ -405,29 +413,39 @@ export default function Live2DView() {
   };
 
   const renderSubtitleClip = (clip: SubtitleClip | null) => {
+    const subtitleContainer = subtitleContainerRef.current;
+    const subtitleSpeakerText = subtitleSpeakerTextRef.current;
+    const subtitleSpeakerUnderline = subtitleSpeakerUnderlineRef.current;
     const subtitleText = subtitleTextRef.current;
-    if (!subtitleText) return;
+    if (!subtitleContainer || !subtitleSpeakerText || !subtitleSpeakerUnderline || !subtitleText) return;
 
     if (!shouldRenderSubtitles() || !clip || !clip.subtitleText.trim()) {
-      subtitleText.visible = false;
+      subtitleContainer.visible = false;
+      subtitleSpeakerText.text = "";
       subtitleText.text = "";
+      subtitleSpeakerUnderline.clear();
       activeSubtitleSignatureRef.current = "";
       return;
     }
 
+    const speakerName = clip.speakerName?.trim() || "";
+    const shouldShowSpeaker = showSubtitleSpeaker && !!speakerName;
+
     const signature = [
       clip.id,
+      shouldShowSpeaker ? speakerName : "",
+      subtitleSpeakerAlign,
       clip.subtitleText,
       clip.fontFamily,
       clip.fontSize,
       clip.textColor,
     ].join("|");
 
-    if (activeSubtitleSignatureRef.current === signature && subtitleText.visible) {
+    if (activeSubtitleSignatureRef.current === signature && subtitleContainer.visible) {
       return;
     }
 
-    subtitleText.visible = true;
+    subtitleContainer.visible = true;
     subtitleText.text = clip.subtitleText;
     subtitleText.style = new PIXI.TextStyle({
       fontFamily: clip.fontFamily || DEFAULT_SUBTITLE_FONT_FAMILY,
@@ -446,6 +464,51 @@ export default function Live2DView() {
       wordWrapWidth: Math.max(320, (appRef.current?.screen.width ?? 1280) - 140),
       breakWords: true,
     });
+
+    subtitleText.position.set(0, 0);
+
+    subtitleSpeakerText.text = shouldShowSpeaker ? speakerName : "";
+    subtitleSpeakerText.style = new PIXI.TextStyle({
+      fontFamily: clip.fontFamily || DEFAULT_SUBTITLE_FONT_FAMILY,
+      fontSize: Math.max(14, Math.round((clip.fontSize || DEFAULT_SUBTITLE_FONT_SIZE) * 0.78)),
+      fontWeight: "700",
+      fill: clip.textColor || DEFAULT_SUBTITLE_TEXT_COLOR,
+      align: "center",
+      stroke: "#081018",
+      strokeThickness: 4,
+      lineJoin: "round",
+      dropShadow: true,
+      dropShadowColor: "#000000",
+      dropShadowBlur: 3,
+      dropShadowDistance: 1,
+    });
+
+    const subtitleBodyBounds = subtitleText.getLocalBounds();
+    const subtitleBodyHeight = subtitleBodyBounds.height;
+    subtitleSpeakerUnderline.clear();
+    if (shouldShowSpeaker) {
+      const speakerBounds = subtitleSpeakerText.getLocalBounds();
+      const wrapWidth = Math.max(320, (appRef.current?.screen.width ?? 1280) - 140);
+      const speakerOffset = Math.min(
+        wrapWidth * 0.22,
+        Math.max(96, (subtitleBodyBounds.width / 2) - 56),
+      );
+      const speakerX =
+        subtitleSpeakerAlign === "left"
+          ? -speakerOffset
+          : subtitleSpeakerAlign === "right"
+            ? speakerOffset
+            : 0;
+      subtitleSpeakerText.position.set(speakerX, -subtitleBodyHeight - 18);
+      const underlineWidth = Math.max(56, speakerBounds.width + 8);
+      const underlineY = subtitleSpeakerText.position.y + 8;
+      subtitleSpeakerUnderline.lineStyle(2, 0x000000, 1);
+      subtitleSpeakerUnderline.moveTo(speakerX - underlineWidth / 2, underlineY);
+      subtitleSpeakerUnderline.lineTo(speakerX + underlineWidth / 2, underlineY);
+    } else {
+      subtitleSpeakerText.position.set(0, -subtitleBodyHeight);
+    }
+
     activeSubtitleSignatureRef.current = signature;
     syncSubtitleDisplayLayout();
   };
@@ -492,7 +555,7 @@ export default function Live2DView() {
 
   const updateSubtitleClip = (
     id: string,
-    patch: Partial<Pick<SubtitleClip, "subtitleText" | "fontFamily" | "fontSize" | "textColor" | "start" | "duration">>,
+    patch: Partial<Pick<SubtitleClip, "subtitleText" | "speakerName" | "fontFamily" | "fontSize" | "textColor" | "start" | "duration">>,
   ) => {
     setSubtitleClips((prev) =>
       prev.map((clip) => {
@@ -502,6 +565,7 @@ export default function Live2DView() {
           ...clip,
           ...patch,
           subtitleText: nextText,
+          speakerName: typeof patch.speakerName === "string" ? patch.speakerName : clip.speakerName,
           name: buildSubtitleClipName(nextText),
           fontSize: Math.max(12, Number(patch.fontSize ?? clip.fontSize) || DEFAULT_SUBTITLE_FONT_SIZE),
           duration: Math.max(0.1, Number(patch.duration ?? clip.duration) || clip.duration),
@@ -1100,6 +1164,7 @@ export default function Live2DView() {
 
       for (const group of plan.groups) {
         const duration =
+          group.durationHintSec ??
           group.audioDurationSec ??
           (group.motion ? importedMotionDurations[group.motion] : undefined) ??
           (group.motion ? motionLen[group.motion] : undefined) ??
@@ -1145,6 +1210,7 @@ export default function Live2DView() {
           nextSubtitleClips.push(
             createSubtitleClip(group.text.trim(), timelineCursor, duration, {
               linkedAudioClipId,
+              speakerName: group.speaker,
             }),
           );
         }
@@ -1279,6 +1345,24 @@ export default function Live2DView() {
       appRef.current = app;
       app.stage.sortableChildren = true;
 
+      const subtitleContainer = new PIXI.Container();
+      subtitleContainer.visible = false;
+      subtitleContainer.zIndex = 10_000;
+
+      const subtitleSpeakerText = new PIXI.Text("", {
+        fontFamily: DEFAULT_SUBTITLE_FONT_FAMILY,
+        fontSize: Math.round(DEFAULT_SUBTITLE_FONT_SIZE * 0.78),
+        fontWeight: "700",
+        fill: DEFAULT_SUBTITLE_TEXT_COLOR,
+        align: "center",
+        stroke: "#081018",
+        strokeThickness: 4,
+        lineJoin: "round",
+      });
+      subtitleSpeakerText.anchor.set(0.5, 1);
+
+      const subtitleSpeakerUnderline = new PIXI.Graphics();
+
       const subtitleText = new PIXI.Text("", {
         fontFamily: DEFAULT_SUBTITLE_FONT_FAMILY,
         fontSize: DEFAULT_SUBTITLE_FONT_SIZE,
@@ -1292,9 +1376,13 @@ export default function Live2DView() {
         wordWrapWidth: Math.max(320, app.screen.width - 140),
       });
       subtitleText.anchor.set(0.5, 1);
-      subtitleText.visible = false;
-      subtitleText.zIndex = 10_000;
-      app.stage.addChild(subtitleText);
+      subtitleContainer.addChild(subtitleSpeakerText);
+      subtitleContainer.addChild(subtitleSpeakerUnderline);
+      subtitleContainer.addChild(subtitleText);
+      app.stage.addChild(subtitleContainer);
+      subtitleContainerRef.current = subtitleContainer;
+      subtitleSpeakerTextRef.current = subtitleSpeakerText;
+      subtitleSpeakerUnderlineRef.current = subtitleSpeakerUnderline;
       subtitleTextRef.current = subtitleText;
       syncSubtitleDisplayLayout();
 
@@ -1331,6 +1419,9 @@ export default function Live2DView() {
         } catch {}
         appRef.current = null;
       }
+      subtitleContainerRef.current = null;
+      subtitleSpeakerTextRef.current = null;
+      subtitleSpeakerUnderlineRef.current = null;
       subtitleTextRef.current = null;
       modelRef.current = null;
       groupContainerRef.current = null;
@@ -1348,7 +1439,7 @@ export default function Live2DView() {
   useEffect(() => {
     if (isPlaying) return;
     renderSubtitleClip(findActiveClip(subtitleClips, playhead) as SubtitleClip | null);
-  }, [subtitleClips, playhead, isPlaying, showSubtitles]);
+  }, [subtitleClips, playhead, isPlaying, showSubtitles, showSubtitleSpeaker, subtitleSpeakerAlign]);
 
   // ??????????
   useEffect(() => {
@@ -1480,12 +1571,6 @@ export default function Live2DView() {
     return () => { aborted = true; };
   }, [modelData, modelUrl]);
 
-  const selectedModelParts = selectedModel ? selectedModel.split("/") : [];
-  const selectedModelDisplayName = externalModelDisplayName ?? (
-    selectedModel
-      ? (selectedModelParts[selectedModelParts.length - 2] ?? selectedModel)
-      : "未加载模型"
-  );
   const panelProps = {
     onToggleWebGALMode: () => setShowWebGALMode(true),
     modelList,
@@ -1517,6 +1602,10 @@ export default function Live2DView() {
     subtitleClips,
     showSubtitles,
     setShowSubtitles,
+    showSubtitleSpeaker,
+    setShowSubtitleSpeaker,
+    subtitleSpeakerAlign,
+    setSubtitleSpeakerAlign,
     onAddSubtitleClip: addSubtitleClip,
     onUpdateSubtitleClip: updateSubtitleClip,
     onRemoveSubtitleClip: removeSubtitleClip,
@@ -1619,17 +1708,6 @@ export default function Live2DView() {
 
         <main className="editor-main">
           <section className="monitor-shell">
-            <div className="monitor-header">
-              <div className="monitor-heading">
-                <div className="monitor-kicker">Program Monitor</div>
-                <h2>{selectedModelDisplayName}</h2>
-              </div>
-              <div className="monitor-meta">
-                <span>{transparentBg ? "透明背景" : "实色背景"}</span>
-                <span>时间线 {timelineLength.toFixed(2)} 秒</span>
-              </div>
-            </div>
-
             <div className="monitor-stage">
               <div
                 ref={containerRef}

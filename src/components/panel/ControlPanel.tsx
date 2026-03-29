@@ -64,10 +64,14 @@ type Props = {
   subtitleClips: SubtitleClip[];
   showSubtitles: boolean;
   setShowSubtitles: (visible: boolean) => void;
+  showSubtitleSpeaker: boolean;
+  setShowSubtitleSpeaker: (visible: boolean) => void;
+  subtitleSpeakerAlign: "left" | "center" | "right";
+  setSubtitleSpeakerAlign: (align: "left" | "center" | "right") => void;
   onAddSubtitleClip: () => void;
   onUpdateSubtitleClip: (
     id: string,
-    patch: Partial<Pick<SubtitleClip, "subtitleText" | "fontFamily" | "fontSize" | "textColor" | "start" | "duration">>,
+    patch: Partial<Pick<SubtitleClip, "subtitleText" | "speakerName" | "fontFamily" | "fontSize" | "textColor" | "start" | "duration">>,
   ) => void;
   onRemoveSubtitleClip: (id: string) => void;
   currentAudioLevel?: number;
@@ -207,6 +211,10 @@ export default function ControlPanel(props: Props) {
     subtitleClips,
     showSubtitles,
     setShowSubtitles,
+    showSubtitleSpeaker,
+    setShowSubtitleSpeaker,
+    subtitleSpeakerAlign,
+    setSubtitleSpeakerAlign,
     onAddSubtitleClip,
     onUpdateSubtitleClip,
     onRemoveSubtitleClip,
@@ -670,6 +678,29 @@ export default function ControlPanel(props: Props) {
                       <span>显示字幕</span>
                     </label>
 
+                    <label className="switch-row subtitle-switch-row">
+                      <input
+                        type="checkbox"
+                        checked={showSubtitleSpeaker}
+                        onChange={(event) => setShowSubtitleSpeaker(event.target.checked)}
+                      />
+                      <span>显示角色名</span>
+                    </label>
+
+                    <label className="field-stack">
+                      <span className="field-label">角色名位置</span>
+                      <select
+                        className="input input--full"
+                        value={subtitleSpeakerAlign}
+                        onChange={(event) => setSubtitleSpeakerAlign(event.target.value as "left" | "center" | "right")}
+                        disabled={!showSubtitleSpeaker}
+                      >
+                        <option value="left">左</option>
+                        <option value="center">中</option>
+                        <option value="right">右</option>
+                      </select>
+                    </label>
+
                     <label className="field-stack">
                       <span className="field-label">字体</span>
                       <select
@@ -724,6 +755,16 @@ export default function ControlPanel(props: Props) {
                               删除
                             </button>
                           </div>
+
+                          <label className="field-stack">
+                            <span className="field-label">角色名</span>
+                            <input
+                              className="input input--full"
+                              value={clip.speakerName ?? ""}
+                              placeholder="可选，如：千早爱音"
+                              onChange={(event) => onUpdateSubtitleClip(clip.id, { speakerName: event.target.value })}
+                            />
+                          </label>
 
                           <label className="field-stack">
                             <span className="field-label">字幕文本</span>

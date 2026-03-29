@@ -10,6 +10,7 @@ export type Clip = {
 
 export type SubtitleClip = Clip & {
   subtitleText: string;
+  speakerName?: string;
   fontFamily: string;
   fontSize: number;
   textColor: string;

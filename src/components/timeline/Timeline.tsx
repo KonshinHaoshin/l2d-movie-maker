@@ -326,7 +326,6 @@ export default function Timeline({
         <div className="tl-header-copy">
           <div className="tl-kicker">时间线</div>
           <h3 className="tl-title">剪辑编排</h3>
-          <p className="tl-description">拖拽片段调整起止，按住 Alt 滚轮缩放时间线，空格键控制播放。</p>
         </div>
         <div className="tl-toolbar">
           <button

@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "l2d-movie-maker",
-  "version": "1.1.1",
+  "version": "1.2.1",
   "identifier": "com.DongshanRandeng.l2dmm",
   "build": {
     "beforeDevCommand": "pnpm run dev",
@@ -11,7 +11,7 @@
   },
   "app": {
     "windows": [
-      { "title": "l2d-movie-maker", "width": 1200, "height": 800, "resizable": true, "transparent": true }
+      { "title": "l2d-movie-maker", "width": 1200, "height": 800, "resizable": true, "transparent": true, "maximized": true }
     ],
     "security": { "csp": null }
   },
