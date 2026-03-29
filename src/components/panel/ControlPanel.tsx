@@ -1,396 +1,961 @@
-// src/components/panel/ControlPanel.tsx
-import React, { useMemo, useState, useEffect } from "react";
-import type { Clip, TrackKind } from "../timeline/types";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import ExportToolbar from "../ExportToolbar";
+import type { SubtitleClip } from "../timeline/clipTypes";
 
-interface Motion { name: string; file: string; }
-interface Expression { name: string; file: string; }
+interface Motion {
+  name: string;
+  file: string;
+}
+
+interface Expression {
+  name: string;
+  file: string;
+}
+
 export interface ModelData {
   motions: { [key: string]: Motion[] };
   expressions: Expression[];
 }
 
-type Props = {
-  onClose: () => void;
+type CharacterOption = {
+  id: string;
+  label: string;
+};
 
-  // 模型清单（来自 /model/models.json）
+type CharacterTransform = {
+  x: number;
+  y: number;
+  scaleX: number;
+  scaleY: number;
+  rotation: number;
+};
+
+export type CharacterTransformMode = "single-relative" | "composite-container";
+
+export type ControlPanelMode = "resources" | "inspector";
+export type InspectorTab = "character" | "subtitle" | "export" | "audio" | "project";
+
+type Props = {
+  mode: ControlPanelMode;
+  activeInspectorTab?: InspectorTab;
+  onChangeInspectorTab?: (tab: InspectorTab) => void;
+  onToggleWebGALMode: () => void;
+
   modelList: string[];
   selectedModel: string | null;
   onSelectModel: (relPath: string | null) => void;
   onRefreshModels?: () => void;
 
-  // 数据
   modelData: ModelData | null;
   motionLen: Record<string, number>;
 
-  // 当前选中
   currentMotion: string;
   currentExpression: string;
 
-  // 时长与设置
   motionDur: number;
   exprDur: number;
   setMotionDur: (n: number) => void;
   setExprDur: (n: number) => void;
 
-  // 行为（由父组件实现）
   chooseMotion: (name: string) => void;
   chooseExpression: (name: string) => void;
   addMotionClip: (name: string) => void;
   addExprClip: (name: string) => void;
-  addAudioClip: () => void; // 新增音频导入功能
-  debugModelParameters?: () => void; // 调试模型参数
-  currentAudioLevel?: number; // 当前音频电平
+  addAudioClip: () => void;
+  subtitleClips: SubtitleClip[];
+  showSubtitles: boolean;
+  setShowSubtitles: (visible: boolean) => void;
+  showSubtitleSpeaker: boolean;
+  setShowSubtitleSpeaker: (visible: boolean) => void;
+  subtitleSpeakerAlign: "left" | "center" | "right";
+  setSubtitleSpeakerAlign: (align: "left" | "center" | "right") => void;
+  onAddSubtitleClip: () => void;
+  onUpdateSubtitleClip: (
+    id: string,
+    patch: Partial<Pick<SubtitleClip, "subtitleText" | "speakerName" | "fontFamily" | "fontSize" | "textColor" | "start" | "duration">>,
+  ) => void;
+  onRemoveSubtitleClip: (id: string) => void;
+  currentAudioLevel?: number;
+  currentFps?: number;
 
-  // 拖拽
+  characterOptions: CharacterOption[];
+  selectedCharacterId: string;
+  onSelectCharacter: (id: string) => void;
+  isCharacterVisible: boolean;
+  onToggleCharacterVisibility: (visible: boolean) => void;
+  characterTransform: CharacterTransform;
+  characterTransformMode: CharacterTransformMode;
+  onUpdateCharacterTransform: (patch: Partial<CharacterTransform>) => void;
+
   enableDragging: boolean;
   setEnableDragging: (v: boolean) => void;
   isDragging: boolean;
 
-  // 播放控制
   timelineLength: number;
   playhead: number;
   isPlaying: boolean;
   startPlayback: () => void;
   stopPlayback: () => void;
-
   clearTimeline: () => void;
 
-
-
-  onChangeClip?: (
-    track: TrackKind,
-    id: string,
-    patch: Partial<Pick<Clip, "start" | "duration">>
-  ) => void;
-  onSetPlayhead?: (sec: number) => void;
+  recordingQuality: "low" | "medium" | "high";
+  setRecordingQuality: (quality: "low" | "medium" | "high") => void;
+  transparentBg: boolean;
+  setTransparentBg: (transparent: boolean) => void;
+  recState: "idle" | "rec" | "done" | "offline";
+  recordingTime: number;
+  recordingProgress: number;
+  blob: Blob | null;
+  onStartRecording: () => void;
+  onStopRecording: () => void;
+  onSaveWebM: () => void;
+  onConvertToMov: () => void;
+  onExportSubtitlesSrt: () => void;
+  onTakeScreenshot: () => void;
+  onTakePartsScreenshots: () => void;
+  isVp9AlphaSupported: () => boolean;
 };
 
-const ControlPanel: React.FC<Props> = (props) => {
+const inspectorTabs: Array<{ id: InspectorTab; label: string }> = [
+  { id: "character", label: "角色" },
+  { id: "subtitle", label: "字幕" },
+  { id: "export", label: "导出" },
+  { id: "audio", label: "音频" },
+  { id: "project", label: "项目" },
+];
+
+const FALLBACK_SUBTITLE_FONTS = [
+  "Microsoft YaHei",
+  "Microsoft YaHei UI",
+  "SimHei",
+  "SimSun",
+  "KaiTi",
+  "FangSong",
+  "Source Han Sans SC",
+  "Noto Sans CJK SC",
+  "Segoe UI",
+  "Arial",
+];
+
+function PanelSection({
+  title,
+  meta,
+  className,
+  children,
+}: {
+  title: string;
+  meta?: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className={`workspace-section${className ? ` ${className}` : ""}`}>
+      <div className="workspace-section-header">
+        <h3 className="workspace-section-title">{title}</h3>
+        {meta ? <span className="workspace-section-meta">{meta}</span> : null}
+      </div>
+      <div className="workspace-section-body">{children}</div>
+    </section>
+  );
+}
+
+function Pager({
+  page,
+  pageCount,
+  onPageChange,
+}: {
+  page: number;
+  pageCount: number;
+  onPageChange: (next: number) => void;
+}) {
+  return (
+    <div className="asset-pager">
+      <button className="btn btn--quiet" onClick={() => onPageChange(1)} disabled={page <= 1}>
+        首页
+      </button>
+      <button className="btn btn--quiet" onClick={() => onPageChange(Math.max(1, page - 1))} disabled={page <= 1}>
+        上一页
+      </button>
+      <span className="pane-note">
+        {page} / {pageCount}
+      </span>
+      <button className="btn btn--quiet" onClick={() => onPageChange(Math.min(pageCount, page + 1))} disabled={page >= pageCount}>
+        下一页
+      </button>
+      <button className="btn btn--quiet" onClick={() => onPageChange(pageCount)} disabled={page >= pageCount}>
+        末页
+      </button>
+    </div>
+  );
+}
+
+export default function ControlPanel(props: Props) {
   const {
-    onClose,
-    modelList, selectedModel, onSelectModel, onRefreshModels,
-    modelData, motionLen,
-    currentMotion, currentExpression,
-    motionDur, exprDur, setMotionDur, setExprDur,
-    chooseMotion, chooseExpression, addMotionClip, addExprClip, addAudioClip,
-    enableDragging, setEnableDragging, isDragging,
-    timelineLength, playhead, isPlaying, startPlayback, stopPlayback,
+    mode,
+    activeInspectorTab = "character",
+    onChangeInspectorTab,
+    onToggleWebGALMode,
+    selectedModel,
+    onRefreshModels,
+    modelData,
+    motionLen,
+    currentMotion,
+    currentExpression,
+    motionDur,
+    exprDur,
+    setMotionDur,
+    setExprDur,
+    chooseMotion,
+    chooseExpression,
+    addMotionClip,
+    addExprClip,
+    addAudioClip,
+    subtitleClips,
+    showSubtitles,
+    setShowSubtitles,
+    showSubtitleSpeaker,
+    setShowSubtitleSpeaker,
+    subtitleSpeakerAlign,
+    setSubtitleSpeakerAlign,
+    onAddSubtitleClip,
+    onUpdateSubtitleClip,
+    onRemoveSubtitleClip,
+    characterOptions,
+    selectedCharacterId,
+    onSelectCharacter,
+    isCharacterVisible,
+    onToggleCharacterVisibility,
+    characterTransform,
+    characterTransformMode,
+    onUpdateCharacterTransform,
+    enableDragging,
+    setEnableDragging,
+    isDragging,
+    timelineLength,
+    playhead,
+    isPlaying,
+    startPlayback,
+    stopPlayback,
     clearTimeline,
+    currentAudioLevel,
+    currentFps,
+    recordingQuality,
+    setRecordingQuality,
+    transparentBg,
+    setTransparentBg,
+    recState,
+    recordingTime,
+    recordingProgress,
+    blob,
+    onStartRecording,
+    onStopRecording,
+    onSaveWebM,
+    onConvertToMov,
+    onExportSubtitlesSrt,
+    onTakeScreenshot,
+    onTakePartsScreenshots,
+    isVp9AlphaSupported,
   } = props;
 
-  // —— 搜索 & 分页（动作） ——
   const [motionQuery, setMotionQuery] = useState("");
   const [motionPage, setMotionPage] = useState(1);
-  const [motionPageSize, setMotionPageSize] = useState(24);
-  useEffect(() => { setMotionPage(1); }, [motionQuery, motionPageSize, modelData]);
+  const [motionPageSize, setMotionPageSize] = useState(12);
+
+  const [exprQuery, setExprQuery] = useState("");
+  const [exprPage, setExprPage] = useState(1);
+  const [exprPageSize, setExprPageSize] = useState(12);
+  const [availableSubtitleFonts, setAvailableSubtitleFonts] = useState<string[]>(FALLBACK_SUBTITLE_FONTS);
+  const paneScrollRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const container = paneScrollRef.current;
+    if (!container) return;
+    const wheelListenerOptions: AddEventListenerOptions = { passive: false };
+
+    const handleWheel = (event: WheelEvent) => {
+      const canScroll = container.scrollHeight > container.clientHeight + 1;
+      if (!canScroll) return;
+
+      const maxScrollTop = container.scrollHeight - container.clientHeight;
+      const nextScrollTop = Math.max(0, Math.min(maxScrollTop, container.scrollTop + event.deltaY));
+      const shouldConsume =
+        (event.deltaY < 0 && container.scrollTop > 0) ||
+        (event.deltaY > 0 && container.scrollTop < maxScrollTop);
+
+      if (!shouldConsume) return;
+
+      container.scrollTop = nextScrollTop;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    container.addEventListener("wheel", handleWheel, wheelListenerOptions);
+    return () => {
+      container.removeEventListener("wheel", handleWheel, wheelListenerOptions);
+    };
+  }, [mode]);
+
+  useEffect(() => {
+    setMotionPage(1);
+  }, [motionQuery, motionPageSize, modelData]);
+
+  useEffect(() => {
+    setExprPage(1);
+  }, [exprQuery, exprPageSize, modelData]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void invoke<string[]>("list_system_font_families")
+      .then((fonts) => {
+        if (cancelled || !Array.isArray(fonts) || fonts.length === 0) return;
+        const merged = Array.from(new Set([...fonts, ...FALLBACK_SUBTITLE_FONTS]));
+        setAvailableSubtitleFonts(merged);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAvailableSubtitleFonts(FALLBACK_SUBTITLE_FONTS);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const allMotionNames = useMemo(
     () => (modelData ? Object.keys(modelData.motions || {}) : []),
-    [modelData]
+    [modelData],
   );
+
   const filteredMotions = useMemo(
-    () => allMotionNames.filter(n => n.toLowerCase().includes(motionQuery.trim().toLowerCase())),
-    [allMotionNames, motionQuery]
+    () => allMotionNames.filter((name) => name.toLowerCase().includes(motionQuery.trim().toLowerCase())),
+    [allMotionNames, motionQuery],
   );
+
   const motionPageCount = Math.max(1, Math.ceil(filteredMotions.length / motionPageSize));
-  const motionPageSafe = Math.min(motionPage, motionPageCount);
-  const motionSlice = filteredMotions.slice(
-    (motionPageSafe - 1) * motionPageSize,
-    motionPageSafe * motionPageSize
+  const safeMotionPage = Math.min(motionPage, motionPageCount);
+  const motionSlice = filteredMotions.slice((safeMotionPage - 1) * motionPageSize, safeMotionPage * motionPageSize);
+
+  const allExpressionNames = useMemo(
+    () => (modelData ? (modelData.expressions || []).map((expr) => expr.name) : []),
+    [modelData],
   );
 
-  // —— 搜索 & 分页（表情） ——
-  const [exprQuery, setExprQuery] = useState("");
-  const [exprPage, setExprPage] = useState(1);
-  const [exprPageSize, setExprPageSize] = useState(24);
-  useEffect(() => { setExprPage(1); }, [exprQuery, exprPageSize, modelData]);
+  const filteredExpressions = useMemo(
+    () => allExpressionNames.filter((name) => name.toLowerCase().includes(exprQuery.trim().toLowerCase())),
+    [allExpressionNames, exprQuery],
+  );
 
-  const allExprNames = useMemo(
-    () => (modelData ? (modelData.expressions || []).map(e => e.name) : []),
-    [modelData]
+  const expressionPageCount = Math.max(1, Math.ceil(filteredExpressions.length / exprPageSize));
+  const safeExpressionPage = Math.min(exprPage, expressionPageCount);
+  const expressionSlice = filteredExpressions.slice(
+    (safeExpressionPage - 1) * exprPageSize,
+    safeExpressionPage * exprPageSize,
   );
-  const filteredExprs = useMemo(
-    () => allExprNames.filter(n => n.toLowerCase().includes(exprQuery.trim().toLowerCase())),
-    [allExprNames, exprQuery]
+
+  const selectedModelParts = selectedModel ? selectedModel.split("/") : [];
+  const selectedModelLabel = selectedModel
+    ? selectedModelParts[selectedModelParts.length - 2] ?? selectedModel
+    : "未选择模型";
+  const hasMultipleCharacters = characterOptions.length > 1;
+
+  const formatTransformValue = (value: number, digits: number, fallback: string) =>
+    Number.isFinite(value) ? value.toFixed(digits) : fallback;
+
+  const subtitleFontFamily = subtitleClips[0]?.fontFamily || FALLBACK_SUBTITLE_FONTS[0];
+  const subtitleFontSize = subtitleClips[0]?.fontSize ?? 34;
+
+  const applySubtitleFontFamilyToAll = (fontFamily: string) => {
+    subtitleClips.forEach((clip) => onUpdateSubtitleClip(clip.id, { fontFamily }));
+  };
+
+  const applySubtitleFontSizeToAll = (fontSize: number) => {
+    const nextFontSize = Math.max(12, fontSize || 12);
+    subtitleClips.forEach((clip) => onUpdateSubtitleClip(clip.id, { fontSize: nextFontSize }));
+  };
+
+  const blurOnWheel = (event: React.WheelEvent<HTMLInputElement>) => {
+    event.currentTarget.blur();
+  };
+
+  const [transformDraft, setTransformDraft] = useState({
+    x: formatTransformValue(characterTransform.x, 1, "0"),
+    y: formatTransformValue(characterTransform.y, 1, "0"),
+    scaleX: formatTransformValue(characterTransform.scaleX, 2, "1"),
+    scaleY: formatTransformValue(characterTransform.scaleY, 2, "1"),
+    rotation: formatTransformValue(characterTransform.rotation, 1, "0"),
+  });
+
+  useEffect(() => {
+    setTransformDraft({
+      x: formatTransformValue(characterTransform.x, 1, "0"),
+      y: formatTransformValue(characterTransform.y, 1, "0"),
+      scaleX: formatTransformValue(characterTransform.scaleX, 2, "1"),
+      scaleY: formatTransformValue(characterTransform.scaleY, 2, "1"),
+      rotation: formatTransformValue(characterTransform.rotation, 1, "0"),
+    });
+  }, [
+    characterTransform.x,
+    characterTransform.y,
+    characterTransform.scaleX,
+    characterTransform.scaleY,
+    characterTransform.rotation,
+    selectedCharacterId,
+  ]);
+
+  const applyTransformDraft = (key: keyof CharacterTransform) => {
+    const parsed = Number(transformDraft[key]);
+    if (!Number.isFinite(parsed)) {
+      setTransformDraft((prev) => ({
+        ...prev,
+        [key]:
+          key === "scaleX" || key === "scaleY"
+            ? formatTransformValue(characterTransform[key], 2, "1")
+            : formatTransformValue(characterTransform[key], 1, "0"),
+      }));
+      return;
+    }
+
+    const normalized = key === "scaleX" || key === "scaleY" ? Math.max(0.01, parsed) : parsed;
+    onUpdateCharacterTransform({ [key]: normalized });
+    setTransformDraft((prev) => ({
+      ...prev,
+      [key]: key === "scaleX" || key === "scaleY" ? normalized.toFixed(2) : normalized.toFixed(1),
+    }));
+  };
+
+  const handleTransformKeyDown =
+    (key: keyof CharacterTransform) => (event: React.KeyboardEvent<HTMLInputElement>) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      applyTransformDraft(key);
+    };
+
+  const transformFields: Array<[keyof CharacterTransform, string]> = [
+    ["x", characterTransformMode === "single-relative" ? "X (%)" : "容器 X"],
+    ["y", characterTransformMode === "single-relative" ? "Y (%)" : "容器 Y"],
+    ["scaleX", "缩放 X"],
+    ["scaleY", "缩放 Y"],
+    ["rotation", "旋转"],
+  ];
+
+  const renderLevelMeter = () => (
+    <div className="meter-card">
+      <div className="meter-row">
+        <span className="pane-note">实时电平</span>
+        <span className="pane-note">{(currentAudioLevel ?? 0).toFixed(1)}%</span>
+      </div>
+      <div className="audio-meter">
+        <div className="audio-meter-fill" style={{ width: `${currentAudioLevel ?? 0}%` }} />
+      </div>
+    </div>
   );
-  const exprPageCount = Math.max(1, Math.ceil(filteredExprs.length / exprPageSize));
-  const exprPageSafe = Math.min(exprPage, exprPageCount);
-  const exprSlice = filteredExprs.slice(
-    (exprPageSafe - 1) * exprPageSize,
-    exprPageSafe * exprPageSize
-  );
+
+  const renderResourceList = (
+    items: string[],
+    activeValue: string,
+    onPreview: (name: string) => void,
+    onAdd: (name: string) => void,
+    kind: "motion" | "expression",
+  ) => {
+    if (items.length === 0) {
+      return (
+        <div className="pane-empty">
+          <strong>{kind === "motion" ? "还没有动作" : "还没有表情"}</strong>
+          <span>先加载模型，再从这里预览并加入时间线。</span>
+        </div>
+      );
+    }
+
+    return (
+      <div className="asset-list">
+        {items.map((name) => (
+          <div key={name} className={`asset-item ${activeValue === name ? "is-active" : ""}`}>
+            <div className="asset-copy">
+              <strong>{name}</strong>
+              <span>
+                {kind === "motion" && motionLen[name] ? `${motionLen[name].toFixed(2)} 秒` : kind === "motion" ? "动作" : ""}
+              </span>
+            </div>
+            <div className="asset-actions">
+              <button className="btn btn--quiet" onClick={() => onPreview(name)}>
+                预览
+              </button>
+              <button className="btn btn--primary" onClick={() => onAdd(name)}>
+                上轨
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const paneTitle = mode === "resources" ? "资源浏览器" : "检查器";
 
   return (
-    <div className="l2d-panel">
-      <div className="l2d-panel-header">
-        <h3 className="l2d-panel-title">🎭 Live2D 控制面板</h3>
-        <button className="l2d-close" onClick={onClose}>✕</button>
-      </div>
-
-      {/* 模型选择 */}
-      <div className="l2d-section">
-        <h4 className="l2d-section-title">🧩 模型选择</h4>
-        <div className="row" style={{ gap: 8 }}>
-          <select
-            className="input"
-            value={selectedModel ?? ""}
-            onChange={(e) => onSelectModel(e.target.value || null)}
-            style={{ width: "100%" }}
-          >
-            {modelList.length === 0 && <option value="">（未发现模型，请确认 exe 同级的 model/ 目录存在）</option>}
-            {modelList.map((rel) => (
-              <option key={rel} value={rel}>
-                {rel}
-              </option>
-            ))}
-          </select>
-          <span className="muted" style={{ whiteSpace: "nowrap" }}>
-            共 {modelList.length} 项
-          </span>
-        </div>
-        <div className="row" style={{ gap: 8, marginTop: 6 }}>
-          {onRefreshModels && (
-            <button 
-              className="btn" 
-              onClick={onRefreshModels}
-              style={{ fontSize: 12 }}
-            >
-              🔄 刷新模型列表
-            </button>
-          )}
-
-          {selectedModel && (
-            <div className="muted" style={{ fontSize: 12 }}>
-              选中：{selectedModel}
-            </div>
-          )}
+    <div className={`workspace-pane workspace-pane--${mode}`}>
+      <div className="workspace-pane-header">
+        <div>
+          <div className="workspace-pane-kicker">{mode === "resources" ? "素材面板" : "参数面板"}</div>
+          <h2 className="workspace-pane-title">{paneTitle}</h2>
         </div>
       </div>
 
-      {/* 动作 */}
-      <div className="l2d-section">
-        <h4 className="l2d-section-title">🎬 动作</h4>
-
-        {/* 搜索 + 分页控制 */}
-        <div className="row" style={{ gap: 8 }}>
-          <input
-            className="input"
-            placeholder="搜索动作..."
-            value={motionQuery}
-            onChange={(e) => setMotionQuery(e.target.value)}
-          />
-          <span className="muted" style={{ whiteSpace: "nowrap" }}>
-            共 {filteredMotions.length} 项
-          </span>
-        </div>
-        <div className="row" style={{ gap: 8, marginTop: 6 }}>
-          <span className="muted">每页</span>
-          <select
-            className="input"
-            value={motionPageSize}
-            onChange={(e) => setMotionPageSize(Number(e.target.value))}
-            style={{ width: 80 }}
-          >
-            {[12, 24, 36, 48, 60].map(n => <option key={n} value={n}>{n}</option>)}
-          </select>
-          <div style={{ flex: 1 }} />
-          <button className="btn" onClick={() => setMotionPage(1)} disabled={motionPageSafe <= 1}>«</button>
-          <button className="btn" onClick={() => setMotionPage(p => Math.max(1, p - 1))} disabled={motionPageSafe <= 1}>‹</button>
-          <span className="muted">第 {motionPageSafe} / {motionPageCount} 页</span>
-          <button className="btn" onClick={() => setMotionPage(p => Math.min(motionPageCount, p + 1))} disabled={motionPageSafe >= motionPageCount}>›</button>
-          <button className="btn" onClick={() => setMotionPage(motionPageCount)} disabled={motionPageSafe >= motionPageCount}>»</button>
-        </div>
-
-        <div className="chip-list" style={{ marginTop: 8 }}>
-          {motionSlice.map((name) => {
-            const sec = motionLen[name];
-            return (
-              <button
-                key={name}
-                className={`chip ${currentMotion === name ? "is-active" : ""}`}
-                title="单击：立即播放；双击：添加到时间线"
-                onClick={() => chooseMotion(name)}
-                onDoubleClick={() => addMotionClip(name)}
-              >
-                {name}{sec ? ` (${sec.toFixed(2)}s)` : ""}
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="row" style={{ marginTop: 8 }}>
-          <span>片段时长(兜底)：</span>
-          <input
-            className="input"
-            type="number"
-            value={motionDur}
-            step={0.1}
-            min={0.1}
-            onChange={(e) => setMotionDur(Math.max(0.1, Number(e.target.value) || 0.1))}
-          />
-          <button className="btn" onClick={() => currentMotion && addMotionClip(currentMotion)}>
-            ➕ 添加当前动作
-          </button>
-        </div>
-      </div>
-
-      {/* 表情 */}
-      <div className="l2d-section">
-        <h4 className="l2d-section-title">😊 表情</h4>
-
-        <div className="row" style={{ gap: 8 }}>
-          <input
-            className="input"
-            placeholder="搜索表情..."
-            value={exprQuery}
-            onChange={(e) => setExprQuery(e.target.value)}
-          />
-          <span className="muted" style={{ whiteSpace: "nowrap" }}>
-            共 {filteredExprs.length} 项
-          </span>
-        </div>
-        <div className="row" style={{ gap: 8, marginTop: 6 }}>
-          <span className="muted">每页</span>
-          <select
-            className="input"
-            value={exprPageSize}
-            onChange={(e) => setExprPageSize(Number(e.target.value))}
-            style={{ width: 80 }}
-          >
-            {[12, 24, 36, 48, 60].map(n => <option key={n} value={n}>{n}</option>)}
-          </select>
-          <div style={{ flex: 1 }} />
-          <button className="btn" onClick={() => setExprPage(1)} disabled={exprPageSafe <= 1}>«</button>
-          <button className="btn" onClick={() => setExprPage(p => Math.max(1, p - 1))} disabled={exprPageSafe <= 1}>‹</button>
-          <span className="muted">第 {exprPageSafe} / {exprPageCount} 页</span>
-          <button className="btn" onClick={() => setExprPage(p => Math.min(exprPageCount, p + 1))} disabled={exprPageSafe >= exprPageCount}>›</button>
-          <button className="btn" onClick={() => setExprPage(exprPageCount)} disabled={exprPageSafe >= exprPageCount}>»</button>
-        </div>
-
-        <div className="chip-list" style={{ marginTop: 8 }}>
-          {exprSlice.map((name) => (
+      {mode === "inspector" ? (
+        <div className="inspector-tabs" role="tablist" aria-label="检查器分页">
+          {inspectorTabs.map((tab) => (
             <button
-              key={name}
-              className={`chip ${currentExpression === name ? "is-active" : ""}`}
-              title="单击：立即应用；双击：添加到时间线"
-              onClick={() => chooseExpression(name)}
-              onDoubleClick={() => addExprClip(name)}
+              key={tab.id}
+              className={`inspector-tab ${activeInspectorTab === tab.id ? "is-active" : ""}`}
+              onClick={() => onChangeInspectorTab?.(tab.id)}
+              role="tab"
+              aria-selected={activeInspectorTab === tab.id}
             >
-              {name}
+              {tab.label}
             </button>
           ))}
         </div>
+      ) : null}
 
-        <div className="row" style={{ marginTop: 8 }}>
-          <span>片段时长(s)：</span>
-          <input
-            className="input"
-            type="number"
-            value={exprDur}
-            step={0.1}
-            min={0.1}
-            onChange={(e) => setExprDur(Math.max(0.1, Number(e.target.value) || 0.1))}
-          />
-          <button className="btn" onClick={() => currentExpression && addExprClip(currentExpression)}>
-            ➕ 添加当前表情
-          </button>
-        </div>
-      </div>
-
-      {/* 拖拽 */}
-      <div className="l2d-section">
-        <h4 className="l2d-section-title">🖱️ 拖拽</h4>
-        <label className="muted">
-          <input
-            type="checkbox"
-            checked={enableDragging}
-            onChange={(e) => setEnableDragging(e.target.checked)}
-            style={{ width: 16, height: 16, marginRight: 8 }}
-          />
-          启用拖拽移动 {isDragging ? "（拖拽中）" : ""}
-        </label>
-      </div>
-
-      {/* 播放控制 */}
-      <div className="l2d-section muted" style={{ fontSize: 12 }}>
-        总时长：{timelineLength.toFixed(2)}s<br />
-        播放头：{playhead.toFixed(2)}s<br />
-        <span style={{ fontSize: 11, opacity: 0.8 }}>💡 提示：按空格键或双击时间线开始/停止播放</span>
-        <div className="row" style={{ marginTop: 6, gap: 6 }}>
-          <button
-            className="btn btn--primary"
-            onClick={startPlayback}
-            disabled={isPlaying || timelineLength <= 0}
-          >
-            ▶ 播放时间线
-          </button>
-          <button
-            className="btn btn--danger"
-            onClick={stopPlayback}
-            disabled={!isPlaying}
-          >
-            ⏹ 停止
-          </button>
-          <button className="btn" onClick={clearTimeline}>🗑 清空</button>
-          <button 
-            className="btn" 
-            onClick={addAudioClip}
-            style={{ background: '#ff6b35', color: 'white' }}
-          >
-            🎵 导入音频
-          </button>
-
-        </div>
-        
-        {/* 音频控制提示 */}
-        <div style={{ marginTop: 8, padding: 8, background: 'rgba(255,107,53,0.1)', borderRadius: 4, fontSize: 11 }}>
-          🔊 <strong>音频播放提示：</strong><br />
-          • 确保系统音量已开启<br />
-          • 浏览器允许音频播放<br />
-          • 音频文件格式支持（MP3、WAV、OGG等）<br />
-          • 如果听不到声音，请检查音频文件是否正常
-        </div>
-        
-        {/* 音频电平显示 */}
-        {props.currentAudioLevel !== undefined && (
-          <div style={{ marginTop: 8, padding: 8, background: 'rgba(107,53,255,0.1)', borderRadius: 4, fontSize: 11 }}>
-            🎵 <strong>实时音频电平：</strong><br />
-            <div style={{ 
-              width: '100%', 
-              height: '20px', 
-              background: '#333', 
-              borderRadius: '10px', 
-              overflow: 'hidden',
-              position: 'relative'
-            }}>
-              <div style={{
-                width: `${props.currentAudioLevel}%`,
-                height: '100%',
-                background: `linear-gradient(90deg, #4CAF50, #FF9800, #F44336)`,
-                transition: 'width 0.1s ease',
-                borderRadius: '10px'
-              }} />
-              <div style={{
-                position: 'absolute',
-                top: '50%',
-                left: '50%',
-                transform: 'translate(-50%, -50%)',
-                color: 'white',
-                fontSize: '10px',
-                fontWeight: 'bold',
-                textShadow: '1px 1px 2px rgba(0,0,0,0.8)'
-              }}>
-                {props.currentAudioLevel.toFixed(1)}%
+      <div ref={paneScrollRef} className="workspace-pane-scroll">
+        {mode === "resources" ? (
+          <>
+            <PanelSection title="动作" meta={`${filteredMotions.length} 条`} className="workspace-section--library">
+              <div className="toolbar-row">
+                <input
+                  className="input input--full"
+                  placeholder="搜索动作名"
+                  value={motionQuery}
+                  onChange={(event) => setMotionQuery(event.target.value)}
+                />
+                <select
+                  className="input input--compact"
+                  value={motionPageSize}
+                  onChange={(event) => setMotionPageSize(Number(event.target.value))}
+                  aria-label="动作分页数量"
+                >
+                  {[8, 12, 16, 24].map((size) => (
+                    <option key={size} value={size}>
+                      {size}/页
+                    </option>
+                  ))}
+                </select>
+                <div className="library-duration-inline">
+                  <label className="field-label" htmlFor="motion-duration">
+                    时长
+                  </label>
+                  <input
+                    id="motion-duration"
+                    className="input"
+                    type="number"
+                    min={0.1}
+                    step={0.1}
+                    value={motionDur}
+                    onChange={(event) => setMotionDur(Math.max(0.1, Number(event.target.value) || 0.1))}
+                  />
+                </div>
               </div>
-            </div>
-            {props.currentAudioLevel > 5 ? '🎤 嘴型动画激活中' : '🔇 等待音频输入'}
-          </div>
+              <Pager page={safeMotionPage} pageCount={motionPageCount} onPageChange={setMotionPage} />
+              {renderResourceList(motionSlice, currentMotion, chooseMotion, addMotionClip, "motion")}
+            </PanelSection>
+
+            <PanelSection title="表情" meta={`${filteredExpressions.length} 条`} className="workspace-section--library">
+              <div className="toolbar-row">
+                <input
+                  className="input input--full"
+                  placeholder="搜索表情名"
+                  value={exprQuery}
+                  onChange={(event) => setExprQuery(event.target.value)}
+                />
+                <select
+                  className="input input--compact"
+                  value={exprPageSize}
+                  onChange={(event) => setExprPageSize(Number(event.target.value))}
+                  aria-label="表情分页数量"
+                >
+                  {[8, 12, 16, 24].map((size) => (
+                    <option key={size} value={size}>
+                      {size}/页
+                    </option>
+                  ))}
+                </select>
+                <div className="library-duration-inline">
+                  <label className="field-label" htmlFor="expression-duration">
+                    时长
+                  </label>
+                  <input
+                    id="expression-duration"
+                    className="input"
+                    type="number"
+                    min={0.1}
+                    step={0.1}
+                    value={exprDur}
+                    onChange={(event) => setExprDur(Math.max(0.1, Number(event.target.value) || 0.1))}
+                  />
+                </div>
+              </div>
+              <Pager page={safeExpressionPage} pageCount={expressionPageCount} onPageChange={setExprPage} />
+              {renderResourceList(expressionSlice, currentExpression, chooseExpression, addExprClip, "expression")}
+            </PanelSection>
+
+          </>
+        ) : (
+          <>
+            {activeInspectorTab === "character" ? (
+              <>
+                <PanelSection title="角色">
+                  {hasMultipleCharacters ? (
+                    <div className="field-stack">
+                      <label className="field-label" htmlFor="inspector-role-select">
+                        当前编辑目标
+                      </label>
+                      <select
+                        id="inspector-role-select"
+                        className="input input--full"
+                        value={selectedCharacterId}
+                        onChange={(event) => onSelectCharacter(event.target.value)}
+                      >
+                        {characterOptions.map((option) => (
+                          <option key={option.id} value={option.id}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : null}
+
+                  <label className="switch-row">
+                    <input
+                      type="checkbox"
+                      checked={isCharacterVisible}
+                      onChange={(event) => onToggleCharacterVisibility(event.target.checked)}
+                    />
+                    <span>{isCharacterVisible ? "显示当前角色" : "隐藏当前角色"}</span>
+                  </label>
+                </PanelSection>
+
+                <PanelSection title="变换">
+                  <div className="pane-note">
+                    {characterTransformMode === "single-relative"
+                      ? "单模型坐标以预览区中心为 0，X / Y 使用百分比。"
+                      : "复合模型这里控制的是整组容器坐标，不是单个子角色的局部位置。"}
+                  </div>
+                  <div className="transform-grid">
+                    {transformFields.map(([key, label]) => (
+                      <label key={key} className="field-stack">
+                        <span className="field-label">{label}</span>
+                        <input
+                          className="input"
+                          type="number"
+                          step={key === "scaleX" || key === "scaleY" ? 0.01 : 0.1}
+                          value={transformDraft[key]}
+                          onChange={(event) => setTransformDraft((prev) => ({ ...prev, [key]: event.target.value }))}
+                          onBlur={() => applyTransformDraft(key)}
+                          onKeyDown={handleTransformKeyDown(key)}
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </PanelSection>
+
+                <PanelSection title="交互">
+                  <label className="switch-row">
+                    <input
+                      type="checkbox"
+                      checked={enableDragging}
+                      onChange={(event) => setEnableDragging(event.target.checked)}
+                    />
+                    <span>{isDragging ? "正在拖拽模型" : "允许在预览区直接拖拽模型"}</span>
+                  </label>
+                </PanelSection>
+              </>
+            ) : null}
+
+            {activeInspectorTab === "subtitle" ? (
+              <>
+                <PanelSection title="统一样式">
+                  <div className="subtitle-global-grid">
+                    <label className="switch-row subtitle-switch-row">
+                      <input
+                        type="checkbox"
+                        checked={showSubtitles}
+                        onChange={(event) => setShowSubtitles(event.target.checked)}
+                      />
+                      <span>显示字幕</span>
+                    </label>
+
+                    <label className="switch-row subtitle-switch-row">
+                      <input
+                        type="checkbox"
+                        checked={showSubtitleSpeaker}
+                        onChange={(event) => setShowSubtitleSpeaker(event.target.checked)}
+                      />
+                      <span>显示角色名</span>
+                    </label>
+
+                    <label className="field-stack">
+                      <span className="field-label">角色名位置</span>
+                      <select
+                        className="input input--full"
+                        value={subtitleSpeakerAlign}
+                        onChange={(event) => setSubtitleSpeakerAlign(event.target.value as "left" | "center" | "right")}
+                        disabled={!showSubtitleSpeaker}
+                      >
+                        <option value="left">左</option>
+                        <option value="center">中</option>
+                        <option value="right">右</option>
+                      </select>
+                    </label>
+
+                    <label className="field-stack">
+                      <span className="field-label">字体</span>
+                      <select
+                        className="input input--full"
+                        value={subtitleFontFamily}
+                        onChange={(event) => applySubtitleFontFamilyToAll(event.target.value)}
+                        disabled={subtitleClips.length === 0}
+                      >
+                        {availableSubtitleFonts.map((font) => (
+                          <option key={font} value={font}>
+                            {font}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="field-stack">
+                      <span className="field-label">字号</span>
+                      <input
+                        className="input"
+                        type="number"
+                        min={12}
+                        step={1}
+                        value={subtitleFontSize}
+                        onWheel={blurOnWheel}
+                        onChange={(event) => applySubtitleFontSizeToAll(Number(event.target.value))}
+                        disabled={subtitleClips.length === 0}
+                      />
+                    </label>
+
+                    <div className="button-row">
+                      <button className="btn btn--primary" onClick={onAddSubtitleClip}>
+                        新增字幕
+                      </button>
+                    </div>
+                  </div>
+                </PanelSection>
+
+                <PanelSection title="字幕编辑" meta={`${subtitleClips.length} 条`}>
+                  {subtitleClips.length === 0 ? (
+                    <div className="pane-empty">
+                      <strong>还没有字幕片段</strong>
+                      <span>可以手动新增，或在 WebGAL 导入时勾选字幕一起进入时间线。</span>
+                    </div>
+                  ) : (
+                    <div className="subtitle-list">
+                      {subtitleClips.map((clip, index) => (
+                        <article key={clip.id} className="subtitle-card">
+                          <div className="subtitle-card-header">
+                            <strong>{clip.name || `字幕 ${index + 1}`}</strong>
+                            <button className="btn btn--quiet subtitle-delete-btn" onClick={() => onRemoveSubtitleClip(clip.id)}>
+                              删除
+                            </button>
+                          </div>
+
+                          <label className="field-stack">
+                            <span className="field-label">角色名</span>
+                            <input
+                              className="input input--full"
+                              value={clip.speakerName ?? ""}
+                              placeholder="可选，如：千早爱音"
+                              onChange={(event) => onUpdateSubtitleClip(clip.id, { speakerName: event.target.value })}
+                            />
+                          </label>
+
+                          <label className="field-stack">
+                            <span className="field-label">字幕文本</span>
+                            <textarea
+                              className="input subtitle-textarea"
+                              value={clip.subtitleText}
+                              rows={3}
+                              onChange={(event) => onUpdateSubtitleClip(clip.id, { subtitleText: event.target.value })}
+                            />
+                          </label>
+
+                          <div className="subtitle-editor-grid">
+                            <label className="field-stack subtitle-inline-field">
+                              <span className="field-label">颜色</span>
+                              <input
+                                className="input input--color"
+                                type="color"
+                                value={clip.textColor}
+                                onChange={(event) => onUpdateSubtitleClip(clip.id, { textColor: event.target.value })}
+                              />
+                            </label>
+                            <label className="field-stack subtitle-inline-field">
+                              <span className="field-label">开始</span>
+                              <input
+                                className="input"
+                                type="number"
+                                min={0}
+                                step={0.1}
+                                value={clip.start}
+                                disabled={Boolean(clip.linkedAudioClipId)}
+                                onWheel={blurOnWheel}
+                                onChange={(event) =>
+                                  onUpdateSubtitleClip(clip.id, {
+                                    start: Math.max(0, Number(event.target.value) || 0),
+                                  })
+                                }
+                              />
+                            </label>
+                            <label className="field-stack subtitle-inline-field">
+                              <span className="field-label">时长</span>
+                              <input
+                                className="input"
+                                type="number"
+                                min={0.1}
+                                step={0.1}
+                                value={clip.duration}
+                                disabled={Boolean(clip.linkedAudioClipId)}
+                                onWheel={blurOnWheel}
+                                onChange={(event) =>
+                                  onUpdateSubtitleClip(clip.id, {
+                                    duration: Math.max(0.1, Number(event.target.value) || 0.1),
+                                  })
+                                }
+                              />
+                            </label>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  )}
+                </PanelSection>
+              </>
+            ) : null}
+
+            {activeInspectorTab === "export" ? (
+              <>
+                <PanelSection title="录制与导出">
+                  <ExportToolbar
+                    recordingQuality={recordingQuality}
+                    setRecordingQuality={setRecordingQuality}
+                    transparentBg={transparentBg}
+                    setTransparentBg={setTransparentBg}
+                    recState={recState}
+                    recordingTime={recordingTime}
+                    recordingProgress={recordingProgress}
+                    blob={blob}
+                    onStartRecording={onStartRecording}
+                    onStopRecording={onStopRecording}
+                    onSaveWebM={onSaveWebM}
+                    onConvertToMov={onConvertToMov}
+                    onExportSubtitlesSrt={onExportSubtitlesSrt}
+                    onTakeScreenshot={onTakeScreenshot}
+                    onTakePartsScreenshots={onTakePartsScreenshots}
+                    isVp9AlphaSupported={isVp9AlphaSupported}
+                  />
+                </PanelSection>
+                <PanelSection title="会话状态">
+                  <div className="stats-grid">
+                    <div className="stat-card">
+                      <span>时间线总长</span>
+                      <strong>{timelineLength.toFixed(2)} 秒</strong>
+                    </div>
+                    <div className="stat-card">
+                      <span>播放头</span>
+                      <strong>{playhead.toFixed(2)} 秒</strong>
+                    </div>
+                    <div className="stat-card">
+                      <span>帧率</span>
+                      <strong>{typeof currentFps === "number" ? currentFps.toFixed(1) : "--"}</strong>
+                    </div>
+                    <div className="stat-card">
+                      <span>录制状态</span>
+                      <strong>{recState === "rec" ? "录制中" : recState === "offline" ? "离线导出中" : recState === "done" ? "可下载" : "待机"}</strong>
+                    </div>
+                  </div>
+                </PanelSection>
+              </>
+            ) : null}
+
+            {activeInspectorTab === "audio" ? (
+              <>
+                <PanelSection title="播放控制">
+                  <div className="button-row">
+                    <button className="btn btn--primary" onClick={isPlaying ? stopPlayback : startPlayback} disabled={timelineLength <= 0 && !isPlaying}>
+                      {isPlaying ? "停止播放" : "开始播放"}
+                    </button>
+                    <button className="btn btn--quiet" onClick={clearTimeline}>
+                      清空时间线
+                    </button>
+                    <button className="btn btn--accent" onClick={addAudioClip}>
+                      导入音频
+                    </button>
+                  </div>
+                </PanelSection>
+                <PanelSection title="音频电平">{renderLevelMeter()}</PanelSection>
+                <PanelSection title="播放监看">
+                  <div className="stats-grid">
+                    <div className="stat-card">
+                      <span>当前播放</span>
+                      <strong>{isPlaying ? "运行中" : "已停止"}</strong>
+                    </div>
+                    <div className="stat-card">
+                      <span>播放头</span>
+                      <strong>{playhead.toFixed(2)} 秒</strong>
+                    </div>
+                  </div>
+                </PanelSection>
+              </>
+            ) : null}
+
+            {activeInspectorTab === "project" ? (
+              <>
+                <PanelSection title="工程概览">
+                  <div className="meta-grid">
+                    <div>
+                      <span>当前模型</span>
+                      <strong>{selectedModelLabel}</strong>
+                    </div>
+                    <div>
+                      <span>动作数量</span>
+                      <strong>{allMotionNames.length}</strong>
+                    </div>
+                    <div>
+                      <span>表情数量</span>
+                      <strong>{allExpressionNames.length}</strong>
+                    </div>
+                    <div>
+                      <span>角色数量</span>
+                      <strong>{characterOptions.length || 1}</strong>
+                    </div>
+                  </div>
+                </PanelSection>
+                <PanelSection title="工程操作">
+                  <div className="button-row">
+                    {onRefreshModels ? (
+                      <button className="btn btn--quiet" onClick={onRefreshModels}>
+                        刷新模型索引
+                      </button>
+                    ) : null}
+                    <button className="btn btn--quiet" onClick={clearTimeline}>
+                      清空时间线
+                    </button>
+                    <button className="btn btn--quiet" onClick={onToggleWebGALMode}>
+                      打开 WebGAL
+                    </button>
+                  </div>
+                </PanelSection>
+              </>
+            ) : null}
+          </>
         )}
       </div>
-
-      
     </div>
   );
-};
-
-export default ControlPanel;
+}

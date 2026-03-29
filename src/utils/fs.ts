@@ -20,13 +20,20 @@ export function normalizePath(p: string): string {
       p = p.replace(/^([a-z]:)/i, "$1\\");
     }
   } else {
-    // 非 Windows 绝对路径：统一为正斜杠
+    const hasNetworkRoot = p.startsWith("//") || p.startsWith("\\\\");
+    const hasPosixAbsoluteRoot = !hasNetworkRoot && (p.startsWith("/") || p.startsWith("\\"));
+
+    // 非 Windows 路径：统一为正斜杠
     p = p.replace(/\\/g, "/");
     // 处理连续的斜杠
     p = p.replace(/\/+/g, "/");
-    // 去掉开头的斜杠（除非是绝对路径）
-    if (p.startsWith("/") && !p.startsWith("//")) {
-      p = p.substring(1);
+    // 保留 POSIX / UNC 绝对路径的根前缀，只清理相对路径上的多余前导斜杠
+    if (hasNetworkRoot) {
+      p = `//${p.replace(/^\/+/g, "")}`;
+    } else if (hasPosixAbsoluteRoot) {
+      p = `/${p.replace(/^\/+/g, "")}`;
+    } else {
+      p = p.replace(/^\/+/g, "");
     }
   }
   
