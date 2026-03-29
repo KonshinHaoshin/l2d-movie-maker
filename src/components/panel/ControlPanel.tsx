@@ -31,6 +31,8 @@ type CharacterTransform = {
   rotation: number;
 };
 
+export type CharacterTransformMode = "single-relative" | "composite-container";
+
 export type ControlPanelMode = "resources" | "inspector";
 export type InspectorTab = "character" | "subtitle" | "export" | "audio" | "project";
 
@@ -83,6 +85,7 @@ type Props = {
   isCharacterVisible: boolean;
   onToggleCharacterVisibility: (visible: boolean) => void;
   characterTransform: CharacterTransform;
+  characterTransformMode: CharacterTransformMode;
   onUpdateCharacterTransform: (patch: Partial<CharacterTransform>) => void;
 
   enableDragging: boolean;
@@ -224,6 +227,7 @@ export default function ControlPanel(props: Props) {
     isCharacterVisible,
     onToggleCharacterVisibility,
     characterTransform,
+    characterTransformMode,
     onUpdateCharacterTransform,
     enableDragging,
     setEnableDragging,
@@ -429,6 +433,14 @@ export default function ControlPanel(props: Props) {
       applyTransformDraft(key);
     };
 
+  const transformFields: Array<[keyof CharacterTransform, string]> = [
+    ["x", characterTransformMode === "single-relative" ? "X (%)" : "容器 X"],
+    ["y", characterTransformMode === "single-relative" ? "Y (%)" : "容器 Y"],
+    ["scaleX", "缩放 X"],
+    ["scaleY", "缩放 Y"],
+    ["rotation", "旋转"],
+  ];
+
   const renderLevelMeter = () => (
     <div className="meter-card">
       <div className="meter-row">
@@ -626,16 +638,13 @@ export default function ControlPanel(props: Props) {
                 </PanelSection>
 
                 <PanelSection title="变换">
+                  <div className="pane-note">
+                    {characterTransformMode === "single-relative"
+                      ? "单模型坐标以预览区中心为 0，X / Y 使用百分比。"
+                      : "复合模型这里控制的是整组容器坐标，不是单个子角色的局部位置。"}
+                  </div>
                   <div className="transform-grid">
-                    {(
-                      [
-                        ["x", "X"],
-                        ["y", "Y"],
-                        ["scaleX", "缩放 X"],
-                        ["scaleY", "缩放 Y"],
-                        ["rotation", "旋转"],
-                      ] as Array<[keyof CharacterTransform, string]>
-                    ).map(([key, label]) => (
+                    {transformFields.map(([key, label]) => (
                       <label key={key} className="field-stack">
                         <span className="field-label">{label}</span>
                         <input

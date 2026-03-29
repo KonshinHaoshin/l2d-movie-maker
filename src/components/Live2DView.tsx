@@ -37,6 +37,7 @@ interface ModelData {
 type MotionLenMap = Record<string, number>;
 type CharacterOption = { id: string; label: string };
 type CharacterTransform = { x: number; y: number; scaleX: number; scaleY: number; rotation: number };
+type CharacterTransformMode = "single-relative" | "composite-container";
 type TransformTarget = Pick<PIXI.Container, "position" | "scale" | "rotation" | "getBounds">;
 type BoundsTarget = Pick<Live2DModel, "width" | "height" | "position" | "scale" | "getBounds" | "getLocalBounds">;
 type RendererWithBackground = PIXI.Renderer & {
@@ -143,8 +144,10 @@ export default function Live2DView() {
   const [characterOptions, setCharacterOptions] = useState<CharacterOption[]>([]);
   const [selectedCharacterId, setSelectedCharacterId] = useState<string>("main");
   const [isCharacterVisible, setIsCharacterVisible] = useState(true);
+  const [characterTransformMode, setCharacterTransformMode] = useState<CharacterTransformMode>("single-relative");
   const [characterTransform, setCharacterTransform] = useState<CharacterTransform>({ x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0 });
   const characterTransformRef = useRef<CharacterTransform>({ x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0 });
+  const characterTransformModeRef = useRef<CharacterTransformMode>("single-relative");
   const isDraggingRef = useRef(false);
 
   const handleDraggingChange = (dragging: boolean) => {
@@ -155,6 +158,32 @@ export default function Live2DView() {
   const syncCharacterTransformState = (transform: CharacterTransform) => {
     characterTransformRef.current = transform;
     setCharacterTransform(transform);
+  };
+
+  const syncCharacterTransformModeState = (mode: CharacterTransformMode) => {
+    characterTransformModeRef.current = mode;
+    setCharacterTransformMode(mode);
+  };
+
+  const resetSingleCharacterTransformState = () => {
+    syncCharacterTransformModeState("single-relative");
+    syncCharacterTransformState({ x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0 });
+  };
+
+  const syncCharacterTransformFromScene = (transform: CharacterTransform) => {
+    if (Array.isArray(modelRef.current)) {
+      syncCharacterTransformModeState("composite-container");
+      syncCharacterTransformState(transform);
+      return;
+    }
+
+    syncCharacterTransformModeState("single-relative");
+    const relative = toSingleModelRelativePosition({ x: transform.x, y: transform.y });
+    syncCharacterTransformState({
+      ...transform,
+      x: relative.x,
+      y: relative.y,
+    });
   };
 
   
@@ -173,7 +202,7 @@ export default function Live2DView() {
     setCustomRecordingBounds,
     enableDragging,
     setIsDragging: handleDraggingChange,
-    onTransformChange: syncCharacterTransformState,
+    onTransformChange: syncCharacterTransformFromScene,
   });
 
   const audioManager = AudioManager({
@@ -182,13 +211,44 @@ export default function Live2DView() {
     setCurrentAudioLevel
   });
 
-  const readTransformFromTarget = (target: TransformTarget): CharacterTransform => ({
-    x: Number(target.position.x),
-    y: Number(target.position.y),
-    scaleX: Number(target.scale.x),
-    scaleY: Number(target.scale.y),
-    rotation: Number(target.rotation * 180 / Math.PI),
-  });
+  const getPreviewDimensions = () => {
+    const fallbackWidth = containerRef.current?.clientWidth ?? 1;
+    const fallbackHeight = containerRef.current?.clientHeight ?? 1;
+    return {
+      width: Math.max(1, appRef.current?.screen.width ?? fallbackWidth),
+      height: Math.max(1, appRef.current?.screen.height ?? fallbackHeight),
+    };
+  };
+
+  const toSingleModelRelativePosition = (position: { x: number; y: number }) => {
+    const { width, height } = getPreviewDimensions();
+    return {
+      x: ((position.x - (width / 2)) / (width / 2)) * 100,
+      y: ((position.y - (height / 2)) / (height / 2)) * 100,
+    };
+  };
+
+  const toSingleModelAbsolutePosition = (position: { x: number; y: number }) => {
+    const { width, height } = getPreviewDimensions();
+    return {
+      x: (width / 2) + ((position.x / 100) * (width / 2)),
+      y: (height / 2) + ((position.y / 100) * (height / 2)),
+    };
+  };
+
+  const readTransformFromTarget = (target: TransformTarget, mode: CharacterTransformMode): CharacterTransform => {
+    const position = mode === "single-relative"
+      ? toSingleModelRelativePosition({ x: Number(target.position.x), y: Number(target.position.y) })
+      : { x: Number(target.position.x), y: Number(target.position.y) };
+
+    return {
+      x: position.x,
+      y: position.y,
+      scaleX: Number(target.scale.x),
+      scaleY: Number(target.scale.y),
+      rotation: Number(target.rotation * 180 / Math.PI),
+    };
+  };
 
   const getTransformTarget = (): TransformTarget | null => {
     const cur = modelRef.current;
@@ -246,13 +306,51 @@ export default function Live2DView() {
     }
   };
 
+  const syncSingleModelAbsoluteTransform = (transform: CharacterTransform = characterTransformRef.current) => {
+    const currentModel = modelRef.current;
+    if (!currentModel || Array.isArray(currentModel)) return;
+    const absolute = toSingleModelAbsolutePosition({ x: transform.x, y: transform.y });
+    currentModel.position.set(absolute.x, absolute.y);
+    currentModel.scale.set(Math.max(0.01, transform.scaleX), Math.max(0.01, transform.scaleY));
+    currentModel.rotation = (transform.rotation * Math.PI) / 180;
+  };
+
+  const syncSingleModelTransformState = (positionMode: "center" | "read" | "preserve" = "preserve") => {
+    const currentModel = modelRef.current;
+    if (!currentModel || Array.isArray(currentModel)) return;
+
+    let nextPosition: { x: number; y: number };
+    if (positionMode === "center") {
+      nextPosition = { x: 0, y: 0 };
+    } else if (positionMode === "read") {
+      nextPosition = toSingleModelRelativePosition({
+        x: Number(currentModel.position.x),
+        y: Number(currentModel.position.y),
+      });
+    } else {
+      nextPosition = {
+        x: characterTransformRef.current.x,
+        y: characterTransformRef.current.y,
+      };
+    }
+
+    syncCharacterTransformModeState("single-relative");
+    syncCharacterTransformState({
+      x: nextPosition.x,
+      y: nextPosition.y,
+      scaleX: Number(currentModel.scale.x),
+      scaleY: Number(currentModel.scale.y),
+      rotation: Number(currentModel.rotation * 180 / Math.PI),
+    });
+  };
+
   const refreshCharacterEditor = () => {
     const cur = modelRef.current;
     if (!cur) {
       setCharacterOptions([]);
       setSelectedCharacterId("main");
       setIsCharacterVisible(true);
-      setCharacterTransform({ x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0 });
+      resetSingleCharacterTransformState();
       return;
     }
 
@@ -272,16 +370,17 @@ export default function Live2DView() {
       setSelectedCharacterId((prev) => (
         options.some((option) => option.id === prev) ? prev : (options[0]?.id ?? "main")
       ));
+      syncCharacterTransformModeState("composite-container");
       const target = groupContainerRef.current;
       if (!target) return;
-      setCharacterTransform(readTransformFromTarget(target));
+      syncCharacterTransformState(readTransformFromTarget(target, "composite-container"));
       syncSelectedCharacterVisibilityState();
       return;
     }
 
     setCharacterOptions([{ id: "main", label: "主角色" }]);
     if (selectedCharacterId !== "main") setSelectedCharacterId("main");
-    setCharacterTransform(readTransformFromTarget(cur));
+    syncSingleModelTransformState("preserve");
     syncSelectedCharacterVisibilityState();
   };
 
@@ -289,7 +388,12 @@ export default function Live2DView() {
     const target = getTransformTarget();
     if (!target) return;
     const next: CharacterTransform = { ...characterTransformRef.current, ...patch };
-    target.position.set(next.x, next.y);
+    if (characterTransformModeRef.current === "single-relative") {
+      const absolute = toSingleModelAbsolutePosition({ x: next.x, y: next.y });
+      target.position.set(absolute.x, absolute.y);
+    } else {
+      target.position.set(next.x, next.y);
+    }
     target.scale.set(Math.max(0.01, next.scaleX), Math.max(0.01, next.scaleY));
     target.rotation = (next.rotation * Math.PI) / 180;
     syncCharacterTransformState(next);
@@ -1227,7 +1331,13 @@ export default function Live2DView() {
       playheadUiLastTsRef.current = null;
       setPlayhead(0);
       resetTimelineTriggerState();
-      requestAnimationFrame(() => refreshCharacterEditor());
+      requestAnimationFrame(() => {
+        if (modelRef.current && !Array.isArray(modelRef.current)) {
+          syncSingleModelTransformState("center");
+        } else {
+          refreshCharacterEditor();
+        }
+      });
     } catch (error) {
       console.error("WebGAL 导入失败", error);
       alert(`导入失败: ${error instanceof Error ? error.message : String(error)}`);
@@ -1325,21 +1435,25 @@ export default function Live2DView() {
   // ????PIXI?????
   useEffect(() => {
     let disposed = false;
-    let resizeHandler: (() => void) | null = null;
+    let resizeObserver: ResizeObserver | null = null;
 
     const run = async () => {
       if (!containerRef.current) return;
+      const host = containerRef.current;
+      const initialWidth = Math.max(1, host.clientWidth);
+      const initialHeight = Math.max(1, host.clientHeight);
 
       window.PIXI = PIXI;
       // ??? view?? PixiJS ?????? canvas??????? canvas ?? WebGL ???
       // ?? 0?? MAX_TEXTURE_IMAGE_UNITS????? checkMaxIfStatementsInShader ??
       const app = new PIXI.Application({
         backgroundAlpha: 0,
-        resizeTo: window,
         preserveDrawingBuffer: true,
         antialias: true,
+        width: initialWidth,
+        height: initialHeight,
       });
-      containerRef.current.appendChild(app.view);
+      host.appendChild(app.view);
       (app.view as HTMLCanvasElement).className = "live2d-canvas";
       canvasRef.current = app.view as HTMLCanvasElement;
       appRef.current = app;
@@ -1392,18 +1506,40 @@ export default function Live2DView() {
       if (modelUrl) {
         await modelManager.loadAnyModel(app, modelUrl);
         if (disposed) return;
+        if (modelRef.current && !Array.isArray(modelRef.current)) {
+          syncSingleModelTransformState("center");
+        } else {
+          refreshCharacterEditor();
+        }
       }
 
-      resizeHandler = () => {
-        if (!appRef.current) return;
-        if (isCompositeRef.current && groupContainerRef.current) {
-          groupContainerRef.current.position.set(appRef.current.screen.width / 2, appRef.current.screen.height / 2);
-        } else if (modelRef.current && !Array.isArray(modelRef.current)) {
-          modelRef.current.position.set(appRef.current.screen.width / 2, appRef.current.screen.height / 2);
+      resizeObserver = new ResizeObserver((entries) => {
+        const entry = entries[0];
+        if (!entry || !appRef.current) return;
+        const width = Math.max(1, Math.round(entry.contentRect.width));
+        const height = Math.max(1, Math.round(entry.contentRect.height));
+        appRef.current.renderer.resize(width, height);
+        if (modelRef.current && !Array.isArray(modelRef.current)) {
+          syncSingleModelAbsoluteTransform();
+          syncSingleModelTransformState("preserve");
+        } else {
+          requestAnimationFrame(() => refreshCharacterEditor());
         }
         syncSubtitleDisplayLayout();
-      };
-      window.addEventListener("resize", resizeHandler);
+        syncRecordingBoundsFromCurrentModel();
+      });
+      resizeObserver.observe(host);
+
+      requestAnimationFrame(() => {
+        if (disposed) return;
+        if (modelRef.current && !Array.isArray(modelRef.current)) {
+          syncSingleModelTransformState("center");
+        } else {
+          refreshCharacterEditor();
+        }
+        syncSubtitleDisplayLayout();
+        syncRecordingBoundsFromCurrentModel();
+      });
     };
 
     run();
@@ -1411,7 +1547,7 @@ export default function Live2DView() {
     return () => {
       disposed = true;
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      if (resizeHandler) window.removeEventListener("resize", resizeHandler);
+      resizeObserver?.disconnect();
       canvasRef.current = null;
       if (appRef.current) {
         try {
@@ -1517,7 +1653,7 @@ export default function Live2DView() {
         setCharacterOptions([]);
         setSelectedCharacterId("main");
         setIsCharacterVisible(true);
-        setCharacterTransform({ x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0 });
+        resetSingleCharacterTransformState();
         return;
       }
 
@@ -1529,7 +1665,13 @@ export default function Live2DView() {
       modelManager.cleanupCurrentModel();
 
       await modelManager.loadAnyModel(appRef.current, modelUrl);
-      requestAnimationFrame(() => refreshCharacterEditor());
+      requestAnimationFrame(() => {
+        if (modelRef.current && !Array.isArray(modelRef.current)) {
+          syncSingleModelTransformState("center");
+        } else {
+          refreshCharacterEditor();
+        }
+      });
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modelUrl]);
@@ -1615,6 +1757,7 @@ export default function Live2DView() {
     isCharacterVisible,
     onToggleCharacterVisibility: setSelectedCharacterVisibility,
     characterTransform,
+    characterTransformMode,
     onUpdateCharacterTransform: updateSelectedCharacterTransform,
     enableDragging,
     setEnableDragging,
