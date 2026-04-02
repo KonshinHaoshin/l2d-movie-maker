@@ -49,6 +49,14 @@ export default function RecordingManager({
   stopPlayback
 }: RecordingManagerProps) {
   const recRef = React.useRef<ReturnType<typeof createVp9AlphaRecorder> | ReturnType<typeof createModelFrameRecorder> | null>(null);
+  const stopTimerRef = React.useRef<number | null>(null);
+
+  const clearStopTimer = () => {
+    if (stopTimerRef.current != null) {
+      window.clearTimeout(stopTimerRef.current);
+      stopTimerRef.current = null;
+    }
+  };
 
   // 开始录�?
   const start = async () => {
@@ -125,23 +133,29 @@ export default function RecordingManager({
       );
     }
 
-    recRef.current.start();
+    clearStopTimer();
+
+    const recorder = recRef.current;
+    recorder.start();
     setRecState("rec");
     setRecordingTime(0);
     setRecordingProgress(0);
     startPlayback();
 
-    setTimeout(() => {
-      if (recRef.current) {
-        stop();
+    stopTimerRef.current = window.setTimeout(() => {
+      if (recRef.current === recorder) {
+        void stop();
       }
     }, totalDuration * 1000);
   };
 
   // 停止录制
   const stop = async () => {
-    if (!recRef.current) return;
-    const b = await recRef.current.stop();
+    clearStopTimer();
+    const recorder = recRef.current;
+    if (!recorder) return;
+    recRef.current = null;
+    const b = await recorder.stop();
     setBlob(b);
     setRecState("done");
     setRecordingTime(0);

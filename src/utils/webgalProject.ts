@@ -2,13 +2,14 @@ import { invoke } from "@tauri-apps/api/core";
 import { appLocalDataDir, dirname, join } from "@tauri-apps/api/path";
 import { open } from "@tauri-apps/plugin-dialog";
 import { exists, mkdir, readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
-import { parseMtn } from "./parseMtn";
+import { parseMotionDurationSeconds } from "./motionDuration";
 import { normalizePath } from "./fs";
 import type { WebGALCommand, WebGALDialogueCommand } from "./webgalScript";
 
 const WEBGAL_STORE_FILE = "webgal-role-mappings.json";
 const AUDIO_ROOT_CANDIDATES = ["vocal", "voice", "audio", "se"] as const;
 const AUDIO_EXT_RE = /\.(wav|mp3|ogg|m4a)$/i;
+const AUDIO_ROOT_PREFIX_RE = new RegExp(`^(?:${AUDIO_ROOT_CANDIDATES.join("|")})/`, "i");
 
 export type WebGALRoleNameMap = Record<string, string>;
 
@@ -357,6 +358,14 @@ function deriveProjectRootFromFigurePath(baseFigurePath: string): string | null 
   return match?.[1] ? normalizePath(match[1]) : null;
 }
 
+function deriveProjectRootFromAudioRoot(audioRoot: string): string | null {
+  const normalized = normalizePath(audioRoot);
+  const match = normalized.match(
+    new RegExp(`^(.*?)[\\\\/]+game[\\\\/]+(?:${AUDIO_ROOT_CANDIDATES.join("|")})(?:[\\\\/]|$)`, "i"),
+  );
+  return match?.[1] ? normalizePath(match[1]) : null;
+}
+
 export async function resolveFigureAbsolutePath(projectRoot: string, figurePath: string): Promise<string> {
   const normalizedPath = normalizePath(figurePath);
   if (isAbsolutePath(normalizedPath)) return normalizedPath;
@@ -367,12 +376,28 @@ export async function resolveFigureAbsolutePath(projectRoot: string, figurePath:
   return normalizePath(await join(projectRoot, "game", "figure", cleaned));
 }
 
-export async function resolveAudioAbsolutePath(audioRoot: string | undefined, audioPath: string | undefined): Promise<string | undefined> {
+export async function resolveAudioAbsolutePath(
+  audioRoot: string | undefined,
+  audioPath: string | undefined,
+  projectRoot?: string,
+): Promise<string | undefined> {
   if (!audioPath) return undefined;
   const normalized = normalizePath(audioPath);
   if (isAbsolutePath(normalized)) return normalized;
+
+  const effectiveProjectRoot = projectRoot ?? (audioRoot ? deriveProjectRootFromAudioRoot(audioRoot) : null);
+  const cleaned = normalized.replace(/^\.\/+/g, "");
+
+  if (/^game\//i.test(cleaned) && effectiveProjectRoot) {
+    return normalizePath(await join(effectiveProjectRoot, cleaned));
+  }
+
+  if (AUDIO_ROOT_PREFIX_RE.test(cleaned) && effectiveProjectRoot) {
+    return normalizePath(await join(effectiveProjectRoot, "game", cleaned));
+  }
+
   if (!audioRoot) return undefined;
-  return normalizePath(await join(audioRoot, normalized));
+  return normalizePath(await join(audioRoot, cleaned));
 }
 
 export async function detectWebGALAudioRoot(
@@ -380,37 +405,53 @@ export async function detectWebGALAudioRoot(
   commands: WebGALCommand[],
   lastAudioRoot?: string,
 ): Promise<string | undefined> {
-  const firstAudioPath = commands.find(
-    (command): command is WebGALDialogueCommand => command.type === "dialogue" && !!command.data.audioPath,
-  )?.data.audioPath;
+  const audioPaths = Array.from(
+    new Set(
+      commands
+        .filter((command): command is WebGALDialogueCommand => command.type === "dialogue" && !!command.data.audioPath)
+        .map((command) => normalizePath(command.data.audioPath!)),
+    ),
+  );
 
-  if (!firstAudioPath) {
+  if (audioPaths.length === 0) {
     if (lastAudioRoot && (await externalPathExists(lastAudioRoot))) {
       return normalizePath(lastAudioRoot);
     }
     return undefined;
   }
 
-  if (isAbsolutePath(firstAudioPath) && (await externalPathExists(firstAudioPath))) {
-    return normalizePath(await dirname(firstAudioPath));
+  for (const audioPath of audioPaths) {
+    if (isAbsolutePath(audioPath) && (await externalPathExists(audioPath))) {
+      return normalizePath(await dirname(audioPath));
+    }
   }
 
+  const candidateRoots: string[] = [];
   if (lastAudioRoot) {
-    const candidate = await resolveAudioAbsolutePath(lastAudioRoot, firstAudioPath);
-    if (candidate && (await externalPathExists(candidate))) {
-      return normalizePath(lastAudioRoot);
-    }
+    candidateRoots.push(normalizePath(lastAudioRoot));
   }
-
   for (const folderName of AUDIO_ROOT_CANDIDATES) {
-    const candidateRoot = normalizePath(await join(projectRoot, "game", folderName));
-    const candidatePath = await resolveAudioAbsolutePath(candidateRoot, firstAudioPath);
-    if (candidatePath && (await externalPathExists(candidatePath))) {
-      return candidateRoot;
+    candidateRoots.push(normalizePath(await join(projectRoot, "game", folderName)));
+  }
+
+  let bestRoot: string | undefined;
+  let bestScore = 0;
+
+  for (const candidateRoot of candidateRoots) {
+    let score = 0;
+    for (const audioPath of audioPaths) {
+      const candidatePath = await resolveAudioAbsolutePath(candidateRoot, audioPath, projectRoot);
+      if (candidatePath && (await externalPathExists(candidatePath))) {
+        score += 1;
+      }
+    }
+    if (score > bestScore) {
+      bestRoot = candidateRoot;
+      bestScore = score;
     }
   }
 
-  return undefined;
+  return bestScore > 0 ? bestRoot : undefined;
 }
 
 export async function probeAudioDuration(projectRoot: string, audioAbsolutePath: string): Promise<number | undefined> {
@@ -498,7 +539,7 @@ export async function buildWebGALPreviewGroups({
       continue;
     }
 
-    const audioAbsolutePath = await resolveAudioAbsolutePath(audioRoot, command.data.audioPath);
+    const audioAbsolutePath = await resolveAudioAbsolutePath(audioRoot, command.data.audioPath, projectRoot);
     const audioDurationSec =
       audioAbsolutePath && projectRoot
         ? await probeAudioDuration(projectRoot, audioAbsolutePath)
@@ -650,13 +691,13 @@ export async function loadWebGALMotionDurations(modelAbsolutePath: string): Prom
   const durations: Record<string, number> = {};
 
   for (const [group, relativeFilePath] of Object.entries(fileMap)) {
-    if (!/\.mtn$/i.test(relativeFilePath)) continue;
+    if (!/\.(?:mtn|motion3\.json)$/i.test(relativeFilePath)) continue;
     try {
       const absoluteMotionPath = await resolveProjectRelativeAsset(modelAbsolutePath, relativeFilePath);
       const text = await externalReadTextFile(absoluteMotionPath);
-      const parsed = parseMtn(text);
-      if (parsed.durationMs > 0) {
-        durations[group] = parsed.durationMs / 1000;
+      const durationSec = parseMotionDurationSeconds(relativeFilePath, text);
+      if (durationSec && durationSec > 0) {
+        durations[group] = durationSec;
       }
     } catch {
       continue;

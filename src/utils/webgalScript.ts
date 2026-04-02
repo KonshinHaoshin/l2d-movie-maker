@@ -44,6 +44,18 @@ type ParseOptions = {
   roleNameMap?: Record<string, string>;
 };
 
+const DIALOGUE_CONTROL_FLAGS = new Set([
+  "id",
+  "figureid",
+  "fontsize",
+  "next",
+  "when",
+  "concat",
+  "notend",
+  "hold",
+  "voice",
+]);
+
 function normalizeSpeakerKey(value: string): string {
   return value.trim().toLocaleLowerCase();
 }
@@ -66,6 +78,56 @@ function stripLineEnding(line: string): string {
   return line.trim().replace(/;+\s*$/, "");
 }
 
+function unquoteToken(token: string): string {
+  if (
+    (token.startsWith('"') && token.endsWith('"')) ||
+    (token.startsWith("'") && token.endsWith("'"))
+  ) {
+    return token.slice(1, -1);
+  }
+  return token;
+}
+
+function tokenizeCommandPayload(value: string): string[] {
+  return value.match(/-(?:"(?:\\.|[^"])*"|'(?:\\.|[^'])*')|"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|\S+/g) ?? [];
+}
+
+function splitLeadingSegment(payload: string): { leading: string; options: string } {
+  let quote: '"' | "'" | null = null;
+
+  for (let index = 0; index < payload.length; index += 1) {
+    const char = payload[index];
+    if (quote) {
+      if (char === quote && payload[index - 1] !== "\\") {
+        quote = null;
+      }
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+
+    if (!/\s/.test(char)) continue;
+
+    let probe = index;
+    while (probe < payload.length && /\s/.test(payload[probe])) {
+      probe += 1;
+    }
+    if (probe >= payload.length || payload[probe] !== "-" || !/[a-z]/i.test(payload[probe + 1] ?? "")) {
+      continue;
+    }
+
+    return {
+      leading: payload.slice(0, index).trim(),
+      options: payload.slice(probe).trim(),
+    };
+  }
+
+  return { leading: payload.trim(), options: "" };
+}
+
 function parseFlagToken(token: string): { key: string; value?: string } | null {
   if (!token.startsWith("-")) return null;
   const body = token.slice(1);
@@ -76,7 +138,7 @@ function parseFlagToken(token: string): { key: string; value?: string } | null {
   }
 
   const key = body.slice(0, eqIndex).trim().toLowerCase();
-  const value = body.slice(eqIndex + 1).trim();
+  const value = unquoteToken(body.slice(eqIndex + 1).trim());
   return key ? { key, value } : null;
 }
 
@@ -97,15 +159,15 @@ export class WebGALParser {
         const match = content.match(/^changeFigure\s*:\s*(.+)$/i);
         if (!match) continue;
 
-        const tokens = match[1].split(/\s+/).filter(Boolean);
-        const path = normalizePath(tokens.shift() ?? "");
+        const { leading, options: optionText } = splitLeadingSegment(match[1]);
+        const path = normalizePath(unquoteToken(leading));
         if (!path) continue;
 
         let id: string | undefined;
         let motion: string | undefined;
         let expression: string | undefined;
 
-        for (const token of tokens) {
+        for (const token of tokenizeCommandPayload(optionText)) {
           const flag = parseFlagToken(token);
           if (!flag?.value) continue;
           if (flag.key === "id") id = flag.value;
@@ -131,33 +193,36 @@ export class WebGALParser {
       if (!dialogueMatch) continue;
 
       const speaker = dialogueMatch[1].trim();
-      const tokens = dialogueMatch[2].trim().split(/\s+/).filter(Boolean);
+      const tokens = tokenizeCommandPayload(dialogueMatch[2].trim());
       const textTokens: string[] = [];
       let audioPath: string | undefined;
       let figureId: string | undefined;
 
       for (const token of tokens) {
-        if (!token.startsWith("-")) {
-          textTokens.push(token);
-          continue;
-        }
-
-        const strippedToken = token.slice(1);
-        if (!audioPath && AUDIO_EXT_RE.test(strippedToken)) {
+        const strippedToken = token.startsWith("-") ? unquoteToken(token.slice(1)) : token;
+        if (token.startsWith("-") && !audioPath && AUDIO_EXT_RE.test(strippedToken)) {
           audioPath = normalizePath(strippedToken);
           continue;
         }
 
         const flag = parseFlagToken(token);
-        if (!flag) continue;
-        if (flag.key === "figureid" && flag.value) {
+        if (flag?.key === "voice" && flag.value && !audioPath && AUDIO_EXT_RE.test(flag.value)) {
+          audioPath = normalizePath(flag.value);
+          continue;
+        }
+        if (flag?.key === "figureid" && flag.value) {
           figureId = flag.value;
           continue;
         }
-        if (flag.key === "id" && flag.value && !figureId) {
+        if (flag?.key === "id" && flag.value && !figureId) {
           figureId = flag.value;
           continue;
         }
+        if (flag && DIALOGUE_CONTROL_FLAGS.has(flag.key)) {
+          continue;
+        }
+
+        textTokens.push(unquoteToken(token));
       }
 
       const text = textTokens.join(" ").trim();
@@ -192,4 +257,3 @@ export class WebGALParser {
     return commands;
   }
 }
-
