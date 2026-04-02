@@ -27,6 +27,7 @@ interface RecordingManagerProps {
   setRecordingTime: (time: number) => void;
   setRecordingProgress: (progress: number) => void;
   setBlob: (blob: Blob | null) => void;
+  prepareAudioRecording?: () => Promise<MediaStream | null>;
   startPlayback: () => void;
   stopPlayback: () => void;
 }
@@ -45,6 +46,7 @@ export default function RecordingManager({
   setRecordingTime,
   setRecordingProgress,
   setBlob,
+  prepareAudioRecording,
   startPlayback,
   stopPlayback
 }: RecordingManagerProps) {
@@ -87,6 +89,8 @@ export default function RecordingManager({
       high: { fps: 60, kbps: 16000 }
     };
     const settings = qualitySettings[recordingQuality];
+    const recordingAudioStream = await prepareAudioRecording?.();
+    const hasRecordingAudioTrack = (recordingAudioStream?.getAudioTracks().length ?? 0) > 0;
 
     // 判断是否使用模型区域录制
     const hasValidBounds = customRecordingBounds && customRecordingBounds.width > 0 && customRecordingBounds.height > 0;
@@ -102,6 +106,11 @@ export default function RecordingManager({
         audioUrl: clip.audioUrl!
       }));
 
+    if (preparedAudioClips.length > 0 && !hasRecordingAudioTrack) {
+      alert("当前录制未获取到音频轨，请先播放一次音频或检查浏览器音频权限。");
+      return;
+    }
+
     // 根据设置选择录制�?
     if (shouldUseModelFrame && customRecordingBounds) {
       recRef.current = createModelFrameRecorder(
@@ -114,6 +123,7 @@ export default function RecordingManager({
             setRecordingTime(time);
             setRecordingProgress((time / totalDuration) * 100);
           },
+          audioStream: recordingAudioStream,
           audioClips: preparedAudioClips,
           transparent: true
         }
@@ -128,6 +138,7 @@ export default function RecordingManager({
             setRecordingTime(time);
             setRecordingProgress((time / totalDuration) * 100);
           },
+          audioStream: recordingAudioStream,
           audioClips: preparedAudioClips
         }
       );

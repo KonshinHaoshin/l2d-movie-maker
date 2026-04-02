@@ -3,12 +3,15 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
 
 export function isVp9AlphaSupported() {
-  return !!(window as any).MediaRecorder?.isTypeSupported?.("video/webm;codecs=vp9");
+  return pickVp9Mime() !== null;
 }
 
 export function pickVp9Mime(): string | null {
+  if (MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")) return "video/webm;codecs=vp9,opus";
+  if (MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus")) return "video/webm;codecs=vp8,opus";
   if (MediaRecorder.isTypeSupported("video/webm;codecs=vp9")) return "video/webm;codecs=vp9";
   if (MediaRecorder.isTypeSupported("video/webm;codecs=vp8")) return "video/webm;codecs=vp8";
+  if (MediaRecorder.isTypeSupported("video/webm;codecs=opus")) return "video/webm;codecs=opus";
   if (MediaRecorder.isTypeSupported("video/webm")) return "video/webm";
   return null;
 }
@@ -102,6 +105,7 @@ export function createVp9AlphaRecorder(
   options?: {
     onProgress?: (time: number) => void;
     audioClips?: Array<{ id: string; start: number; duration: number; audioUrl: string }>;
+    audioStream?: MediaStream | null;
   }
 ) {
   let mr: MediaRecorder | null = null;
@@ -115,15 +119,19 @@ export function createVp9AlphaRecorder(
   function makeStream(): MediaStream {
     canvas.style.background = 'transparent';
     const s = canvas.captureStream(fps);
-    try {
-      ac = new AudioContext();
-      const dest = ac.createMediaStreamDestination();
-      audioManager = createAudioManager(ac, dest, options?.audioClips);
-      audioManager.setupAudioTracks();
-      const at = dest.stream.getAudioTracks()[0];
-      if (at) s.addTrack(at);
-    } catch (e) {
-      console.warn("[rec] audio setup failed:", e);
+    if (options?.audioStream) {
+      options.audioStream.getAudioTracks().forEach((track) => s.addTrack(track.clone()));
+    } else {
+      try {
+        ac = new AudioContext();
+        const dest = ac.createMediaStreamDestination();
+        audioManager = createAudioManager(ac, dest, options?.audioClips);
+        audioManager.setupAudioTracks();
+        const at = dest.stream.getAudioTracks()[0];
+        if (at) s.addTrack(at);
+      } catch (e) {
+        console.warn("[rec] audio setup failed:", e);
+      }
     }
     stream = s;
     return s;
@@ -199,6 +207,7 @@ export function createModelFrameRecorder(
     transparent?: boolean;
     showFrame?: boolean;
     audioClips?: Array<{ id: string; start: number; duration: number; audioUrl: string }>;
+    audioStream?: MediaStream | null;
   }
 ) {
   let mr: MediaRecorder | null = null;
@@ -225,15 +234,19 @@ export function createModelFrameRecorder(
 
   function makeStream(): MediaStream {
     const s = cropCanvas.captureStream(fps);
-    try {
-      ac = new AudioContext();
-      const dest = ac.createMediaStreamDestination();
-      audioManager = createAudioManager(ac, dest, options?.audioClips);
-      audioManager.setupAudioTracks();
-      const at = dest.stream.getAudioTracks()[0];
-      if (at) s.addTrack(at);
-    } catch (e) {
-      console.warn("[rec] audio setup failed:", e);
+    if (options?.audioStream) {
+      options.audioStream.getAudioTracks().forEach((track) => s.addTrack(track.clone()));
+    } else {
+      try {
+        ac = new AudioContext();
+        const dest = ac.createMediaStreamDestination();
+        audioManager = createAudioManager(ac, dest, options?.audioClips);
+        audioManager.setupAudioTracks();
+        const at = dest.stream.getAudioTracks()[0];
+        if (at) s.addTrack(at);
+      } catch (e) {
+        console.warn("[rec] audio setup failed:", e);
+      }
     }
     stream = s;
     return s;

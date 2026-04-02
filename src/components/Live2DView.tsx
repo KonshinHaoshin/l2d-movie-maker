@@ -777,29 +777,7 @@ export default function Live2DView() {
   };
 
   const registerAudioElement = (clipId: string, audioUrl: string) => {
-    const audioElement = new Audio(audioUrl);
-    audioElement.crossOrigin = "anonymous";
-    audioElement.preload = "auto";
-    audioElement.volume = 0.8;
-    audioManager.audioRefs.current.set(clipId, audioElement);
-
-    if (audioManager.audioContextRef.current) {
-      try {
-        const source = audioManager.audioContextRef.current.createMediaElementSource(audioElement);
-        const analyzer = audioManager.audioContextRef.current.createAnalyser();
-        analyzer.fftSize = 256;
-        analyzer.smoothingTimeConstant = 0.8;
-
-        source.connect(analyzer);
-        analyzer.connect(audioManager.audioContextRef.current.destination);
-
-        audioManager.audioAnalyzersRef.current.set(clipId, { source, analyzer });
-      } catch (error) {
-        console.warn("音频分析器初始化失败", error);
-      }
-    }
-
-    return audioElement;
+    return audioManager.registerAudioElement(clipId, audioUrl);
   };
 
   const syncPreviewAudioAtTime = (timeSec: number) => {
@@ -1271,6 +1249,10 @@ export default function Live2DView() {
     setRecordingTime,
     setRecordingProgress,
     setBlob,
+    prepareAudioRecording: async () => {
+      await audioManager.resumeAudioContext();
+      return audioManager.recordingDestinationRef.current?.stream ?? null;
+    },
     startPlayback,
     stopPlayback
   });
@@ -2013,20 +1995,7 @@ export default function Live2DView() {
                   ? { ...clip, linkedAudioClipId: undefined }
                   : clip
               )));
-              const audio = audioManager.audioRefs.current.get(id);
-              if (audio) {
-                audio.pause();
-                audio.src = "";
-                audioManager.audioRefs.current.delete(id);
-              }
-              const analyzerData = audioManager.audioAnalyzersRef.current.get(id);
-              if (analyzerData) {
-                try {
-                  analyzerData.source.disconnect();
-                  analyzerData.analyzer.disconnect();
-                } catch {}
-                audioManager.audioAnalyzersRef.current.delete(id);
-              }
+              audioManager.unregisterAudioElement(id);
             } else if (track === "subtitle") {
               removeSubtitleClip(id);
             }
