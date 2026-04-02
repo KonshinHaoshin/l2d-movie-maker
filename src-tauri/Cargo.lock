@@ -1759,7 +1759,7 @@ dependencies = [
 
 [[package]]
 name = "l2d-movie-maker"
-version = "1.2.2"
+version = "1.2.3"
 dependencies = [
  "fontdb",
  "glob",
