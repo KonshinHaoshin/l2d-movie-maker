@@ -4,7 +4,7 @@ import * as PIXI from "pixi.js";
 import { Live2DModel } from "pixi-live2d-display";
 import Timeline from "./timeline/Timeline";
 import type { Clip, SubtitleClip, TrackKind } from "./timeline/clipTypes";
-import { parseMtn } from "../utils/parseMtn";
+import { parseMotionDurationSeconds } from "../utils/motionDuration";
 import "./Live2DView.css";
 import ControlPanel, { type InspectorTab } from "./panel/ControlPanel";
 import ModelManager from "./ModelManager";
@@ -1801,11 +1801,10 @@ export default function Live2DView() {
       const results = await Promise.all(
         entries.map(async ([group, arr]) => {
           const first = arr?.[0]?.file;
-          if (!first || !/\.mtn$/i.test(first)) return [group, undefined] as const;
+          if (!first || !/\.(?:mtn|motion3\.json)$/i.test(first)) return [group, undefined] as const;
           try {
             const txt = await (await fetch(resolveUrl(first))).text();
-            const info = parseMtn(txt);
-            return [group, info.durationMs / 1000] as const;
+            return [group, parseMotionDurationSeconds(first, txt)] as const;
           } catch {
             return [group, undefined] as const;
           }

@@ -13,14 +13,20 @@ export function pickVp9Mime(): string | null {
   return null;
 }
 
-// 音频管理�?
+// 音频管理�?
 function createAudioManager(
   ac: AudioContext,
   audioDestination: MediaStreamAudioDestinationNode,
   audioClips?: Array<{ id: string; start: number; duration: number; audioUrl: string }>
 ) {
   const audioElements = new Map<string, HTMLAudioElement>();
+  const playbackTimers = new Set<number>();
   let cs: ConstantSourceNode | null = null;
+
+  function clearPlaybackTimers() {
+    playbackTimers.forEach((timerId) => window.clearTimeout(timerId));
+    playbackTimers.clear();
+  }
 
   function setupAudioTracks(): boolean {
     if (audioClips && audioClips.length > 0) {
@@ -48,29 +54,36 @@ function createAudioManager(
   }
 
   function startAudioPlayback(sortedClips: Array<{ id: string; start: number; duration: number }>) {
+    clearPlaybackTimers();
     sortedClips.forEach((clip) => {
       const audio = audioElements.get(clip.id);
       if (audio) {
-        setTimeout(() => {
+        const startTimerId = window.setTimeout(() => {
+          playbackTimers.delete(startTimerId);
           try {
             audio.currentTime = 0;
             audio.play().catch(() => {});
-            setTimeout(() => {
+            const stopTimerId = window.setTimeout(() => {
+              playbackTimers.delete(stopTimerId);
               try { audio.pause(); audio.currentTime = 0; } catch (e) {}
             }, clip.duration * 1000);
+            playbackTimers.add(stopTimerId);
           } catch (e) {}
         }, clip.start * 1000);
+        playbackTimers.add(startTimerId);
       }
     });
   }
 
   function stopAllAudio() {
+    clearPlaybackTimers();
     audioElements.forEach(audio => {
       try { audio.pause(); audio.currentTime = 0; } catch (e) {}
     });
   }
 
   function cleanup() {
+    clearPlaybackTimers();
     try { cs?.stop(); } catch {}
     audioElements.forEach(audio => {
       try { audio.pause(); audio.src = ''; } catch (e) {}
@@ -81,7 +94,7 @@ function createAudioManager(
   return { setupAudioTracks, startAudioPlayback, stopAllAudio, cleanup };
 }
 
-// 全屏录制�?
+// 全屏录制�?
 export function createVp9AlphaRecorder(
   canvas: HTMLCanvasElement,
   fps = 60,
@@ -175,7 +188,7 @@ export function createVp9AlphaRecorder(
   return { start, stop, cleanup, saveWebM, getRecordingTime, isRecording };
 }
 
-// 模型区域录制�?- 支持音频+透明背景
+// 模型区域录制�?- 支持音频+透明背景
 export function createModelFrameRecorder(
   canvas: HTMLCanvasElement,
   modelBounds: { x: number; y: number; width: number; height: number },
