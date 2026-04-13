@@ -993,8 +993,12 @@ export default function Live2DView() {
     resetTimelineTriggerState();
     setIsPlaying(false);
     setPlayhead(playheadRef.current);
-    
-    // ?????????
+
+        // Reset model to default/idle state when playback stops
+    applyExpression("default");
+    modelManager.forEachModel((m) => m.motion("Idle", 0, 0));
+
+    // Stop audio
     audioManager.stopAllAudio();
   };
 
