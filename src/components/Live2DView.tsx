@@ -12,6 +12,7 @@ import type { JsonlLive2DModel } from "./ModelManager";
 import AudioManager from "./AudioManager";
 import RecordingManager from "./RecordingManager";
 import WebGALMode from "./WebGALMode";
+import AlertModal from "./AlertModal";
 // import { convertFileSrc } from "@tauri-apps/api/core";
 // import { normalizePath } from "../utils/fs";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
@@ -138,9 +139,13 @@ export default function Live2DView() {
   // ????????????????//
   const [customRecordingBounds, setCustomRecordingBounds] = useState({ x: 0, y: 0, width: 800, height: 600 });
    
-  // ????????? ???//
+// ????????? ???//
   const [recordingQuality, setRecordingQuality] = useState<"low" | "medium" | "high">("medium");
-  
+
+  // ??????????????//
+  const [alertMessage, setAlertMessage] = useState<string | null>(null);
+  const showAlert = (msg: string) => setAlertMessage(msg);
+
   // ????????????????? ???//
   const useModelFrame = false;
   const [characterOptions, setCharacterOptions] = useState<CharacterOption[]>([]);
@@ -840,7 +845,7 @@ export default function Live2DView() {
 
       const duration = audio.duration;
       if (duration <= 0) {
-        alert('????????');
+        showAlert("音频加载失败");
         return;
       }
 
@@ -865,8 +870,8 @@ export default function Live2DView() {
 
       setAudioClips(prev => [...prev, audioClip]);
     } catch (error) {
-      console.error('??????:', error);
-      alert('??????: ' + error);
+      console.error('音频加载失败:', error);
+      showAlert("音频加载失败: " + String(error));
     }
   };
 
@@ -988,8 +993,12 @@ export default function Live2DView() {
     resetTimelineTriggerState();
     setIsPlaying(false);
     setPlayhead(playheadRef.current);
-    
-    // ?????????
+
+        // Reset model to default/idle state when playback stops
+    applyExpression("default");
+    modelManager.forEachModel((m) => m.motion("Idle", 0, 0));
+
+    // Stop audio
     audioManager.stopAllAudio();
   };
 
@@ -1050,7 +1059,7 @@ export default function Live2DView() {
       .sort((left, right) => left.start - right.start);
 
     if (entries.length === 0) {
-      alert("当前没有可导出的字幕");
+      showAlert("当前没有可导出的字幕");
       return;
     }
 
@@ -1077,7 +1086,7 @@ export default function Live2DView() {
     if (recState === "rec" || recState === "offline") return;
 
     if (mode === "subtitle-only" && subtitleClips.length === 0) {
-      alert("当前没有可导出的字幕轨内容");
+      showAlert("当前没有可导出的字幕轨内容");
       return;
     }
 
@@ -1090,7 +1099,7 @@ export default function Live2DView() {
     );
 
     if (totalDuration <= 0) {
-      alert("??????????????????????");
+      showAlert("时间线为空，无法导出");
       return;
     }
 
@@ -1104,7 +1113,7 @@ export default function Live2DView() {
 
     const blobOnlyAudio = audioClips.filter(c => c.audioUrl && !c.audioPath && /^blob:/i.test(c.audioUrl));
     if (blobOnlyAudio.length > 0) {
-      alert('??: ?? blob ?????????????????????????????');
+      showAlert("错误: 存在 blob 音频无法直接导出");
     }
 
     const hasValidBounds = customRecordingBounds && customRecordingBounds.width > 0 && customRecordingBounds.height > 0;
@@ -1220,8 +1229,8 @@ export default function Live2DView() {
       setRecordingTime(0);
       setRecordingProgress(0);
     } catch (error) {
-      console.error('??????:', error);
-      alert('??????: ' + error);
+      console.error('离线导出失败:', error);
+      showAlert("离线导出失败: " + String(error));
       setRecState('idle');
       setRecordingTime(0);
       setRecordingProgress(0);
@@ -1254,7 +1263,8 @@ export default function Live2DView() {
       return audioManager.recordingDestinationRef.current?.stream ?? null;
     },
     startPlayback,
-    stopPlayback
+    stopPlayback,
+    showAlert
   });
 
   const saveWebM = async () => {
@@ -1427,7 +1437,7 @@ export default function Live2DView() {
       });
     } catch (error) {
       console.error("WebGAL 导入失败", error);
-      alert(`导入失败: ${error instanceof Error ? error.message : String(error)}`);
+      showAlert(`导入失败: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
@@ -2017,6 +2027,10 @@ export default function Live2DView() {
             defaultExpressionDuration={exprDur}
           />
         </div>
+      )}
+
+      {alertMessage && (
+        <AlertModal message={alertMessage} onClose={() => setAlertMessage(null)} />
       )}
     </div>
   );
