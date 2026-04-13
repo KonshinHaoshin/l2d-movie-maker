@@ -30,6 +30,7 @@ interface RecordingManagerProps {
   prepareAudioRecording?: () => Promise<MediaStream | null>;
   startPlayback: () => void;
   stopPlayback: () => void;
+  showAlert: (msg: string) => void;
 }
 
 export default function RecordingManager({
@@ -48,7 +49,8 @@ export default function RecordingManager({
   setBlob,
   prepareAudioRecording,
   startPlayback,
-  stopPlayback
+  stopPlayback,
+  showAlert
 }: RecordingManagerProps) {
   const recRef = React.useRef<ReturnType<typeof createVp9AlphaRecorder> | ReturnType<typeof createModelFrameRecorder> | null>(null);
   const stopTimerRef = React.useRef<number | null>(null);
@@ -60,15 +62,15 @@ export default function RecordingManager({
     }
   };
 
-  // 开始录�?
+  // 开始录制
   const start = async () => {
     if (!canvasRef.current) return;
     if (!isVp9AlphaSupported()) {
-      alert("������ʱ�������������ݣ��������������Ƶ��");
+      showAlert("不支持实时录制Alpha通道的视频，请使用离线导出模式");
       return;
     }
 
-    // 计算总时�?
+    // 计算总时长
     const totalDuration = Math.max(
       motionClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
       exprClips.reduce((t, c) => Math.max(t, c.start + c.duration), 0),
@@ -78,7 +80,7 @@ export default function RecordingManager({
     );
 
     if (totalDuration <= 0) {
-      alert("������ʱ�������������ݣ��������������Ƶ��");
+      showAlert("时间线为空，无法录制视频");
       return;
     }
 
@@ -107,11 +109,11 @@ export default function RecordingManager({
       }));
 
     if (preparedAudioClips.length > 0 && !hasRecordingAudioTrack) {
-      alert("当前录制未获取到音频轨，请先播放一次音频或检查浏览器音频权限。");
+      showAlert("当前录制未获取到音频轨，请先播放一次音频或检查浏览器音频权限。");
       return;
     }
 
-    // 根据设置选择录制�?
+    // 根据设置选择录制模式
     if (shouldUseModelFrame && customRecordingBounds) {
       recRef.current = createModelFrameRecorder(
         canvasRef.current,
@@ -183,31 +185,29 @@ export default function RecordingManager({
       const blob = await new Promise<Blob | null>((resolve) => {
         canvasRef.current!.toBlob((blob) => resolve(blob), 'image/png', 1.0);
       });
-      if (!blob) { alert("截图失败"); return; }
+      if (!blob) { showAlert("截图失败"); return; }
       const out = await save({
         defaultPath: `screenshot-${Date.now()}.png`,
         filters: [{ name: "PNG", extensions: ["png"] }],
       });
       if (!out) return;
       await writeFile(out, new Uint8Array(await blob.arrayBuffer()));
-    } catch (error) {
-      alert("截图失败");
+    } catch {
+      showAlert("截图失败");
     }
   };
 
   const takePartsScreenshots = async () => {
     if (!canvasRef.current || !modelRef.current) {
-      alert("模型或Canvas未初始化");
+      showAlert("模型或Canvas未初始化");
       return;
     }
     try {
       await exportModelParts(modelRef.current, canvasRef.current);
     } catch (error) {
-      alert("部件截图失败: " + String(error));
+      showAlert("部件截图失败: " + String(error));
     }
   };
 
   return { recRef, start, stop, saveWebM, toMov, takeScreenshot, takePartsScreenshots };
 }
-
-

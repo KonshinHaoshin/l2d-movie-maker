@@ -743,10 +743,16 @@
   outline: none;
 }
 
+.btn:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 2px;
+}
+
 .btn:disabled {
   cursor: not-allowed;
   opacity: 0.45;
   transform: none;
+  pointer-events: none;
 }
 
 .btn--primary {
@@ -1120,6 +1126,12 @@
   border-radius: 12px;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15);
   overflow: hidden;
+  transition: filter 150ms ease, box-shadow 150ms ease;
+}
+
+.tl-clip:hover {
+  filter: brightness(1.1);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15), 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
 .tl-audio-visual {
@@ -1302,6 +1314,44 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(7, 11, 16, 0.7);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-box {
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 24px;
+  max-width: 400px;
+  text-align: center;
+  box-shadow: var(--shadow-lg);
+}
+
+.modal-icon {
+  font-size: 2rem;
+  margin-bottom: 12px;
+}
+
+.modal-message {
+  margin: 0 0 20px;
+  color: var(--text);
+  font-size: 0.95rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.modal-close-btn {
+  min-width: 100px;
 }
 
 .editor-overlay {
